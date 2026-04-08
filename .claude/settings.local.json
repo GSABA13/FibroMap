@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unzip -p \"/c/Users/user/Downloads/files \\(1\\).zip\" ui-ux.md)",
+      "Bash(unzip -p \"/c/Users/user/Downloads/files \\(1\\).zip\" code-reviewer.md)",
+      "Bash(unzip -p \"/c/Users/user/Downloads/files \\(1\\).zip\" excel-reader.md)",
+      "Bash(unzip -p \"/c/Users/user/Downloads/files \\(1\\).zip\" pdf-exporter.md)",
+      "Bash(unzip -p \"/c/Users/user/Downloads/files \\(1\\).zip\" CLAUDE.md)"
+    ]
+  }
+}

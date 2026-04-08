@@ -1,0 +1,6 @@
+PyQt6
+openpyxl
+pdf2image
+Pillow
+reportlab
+PyInstaller
