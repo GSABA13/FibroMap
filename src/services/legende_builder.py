@@ -54,6 +54,9 @@ def construire_texte(
     # --- Ligne 1 : toujours l'identifiant du prélèvement ---
     ligne1: str = prelevement
 
+    # Défense contre un None accidentel (normalement garanti str par excel_reader)
+    description = description or ""
+
     # --- Ligne 2 : description, avec règles spécifiques ---
     if description.strip() == "/":
         # Si la description vaut "/", on affiche le résultat d'analyse à la place

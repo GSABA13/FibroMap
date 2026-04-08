@@ -73,7 +73,7 @@ def _ligne_complete(
 
 def _creer_classeur_mock(sheetnames, lignes_par_feuille=None):
     """
-    Crée un classeur openpyxl mocké.
+    Crée un classeur openpyxl mocké compatible avec le context manager (with).
 
     Args:
         sheetnames          : liste des noms de feuilles présents dans le classeur.
@@ -85,6 +85,11 @@ def _creer_classeur_mock(sheetnames, lignes_par_feuille=None):
     classeur = MagicMock()
     classeur.sheetnames = sheetnames
     classeur.close = MagicMock()
+
+    # Support du context manager : __enter__ retourne le classeur lui-même,
+    # __exit__ appelle close() pour vérifier que la fermeture est bien effectuée.
+    classeur.__enter__ = MagicMock(return_value=classeur)
+    classeur.__exit__ = MagicMock(side_effect=lambda *args: classeur.close())
 
     def _getitem(nom):
         feuille = MagicMock()
@@ -194,6 +199,8 @@ class TestEntetesIgnorees:
         classeur_mock.sheetnames = ["Prv Am"]
         classeur_mock.__getitem__ = MagicMock(return_value=feuille_mock)
         classeur_mock.close = MagicMock()
+        classeur_mock.__enter__ = MagicMock(return_value=classeur_mock)
+        classeur_mock.__exit__ = MagicMock(side_effect=lambda *args: classeur_mock.close())
 
         with patch("src.services.excel_reader.openpyxl.load_workbook", return_value=classeur_mock):
             charger_excel("fictif.xlsx")
@@ -302,8 +309,8 @@ class TestFermetureClasseur:
         classeur_mock.close.assert_called_once()
 
     def test_classeur_ouvert_en_read_only(self):
-        """openpyxl doit être appelé avec read_only=True et data_only=True."""
+        """openpyxl doit être appelé avec read_only=True, data_only=True et keep_vba=True."""
         classeur_mock = _creer_classeur_mock(sheetnames=[])
         with patch("src.services.excel_reader.openpyxl.load_workbook", return_value=classeur_mock) as mock_load:
             charger_excel("mon_fichier.xlsx")
-        mock_load.assert_called_once_with("mon_fichier.xlsx", read_only=True, data_only=True)
+        mock_load.assert_called_once_with("mon_fichier.xlsx", read_only=True, data_only=True, keep_vba=True)

@@ -28,7 +28,7 @@ MENTION_NON_PRELEVE: str = "a?"  # Statut inconnu / non prélevé
 MENTION_PRESENCE: str = "a"    # Amiante présent
 
 
-def resoudre_couleur(resultat: str) -> tuple[tuple, str]:
+def resoudre_couleur(resultat: str | None) -> tuple[tuple, str]:
     """
     Détermine la couleur RGB et la mention associée au résultat d'analyse.
 
@@ -36,8 +36,8 @@ def resoudre_couleur(resultat: str) -> tuple[tuple, str]:
 
     Args:
         resultat: Chaîne de caractères issue de la colonne I du fichier Excel.
-                  Peut être vide ou contenir des valeurs telles que "Absence",
-                  "Présence", "non prélevé", etc.
+                  Peut être None, vide ou contenir des valeurs telles que "Absence",
+                  "Présence", "non prélevé", etc. None est traité comme vide.
 
     Returns:
         Un tuple (couleur_rgb, mention) où :

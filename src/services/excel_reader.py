@@ -31,7 +31,6 @@ sans lever d'exception.
 """
 
 import logging
-from typing import Optional
 
 import openpyxl
 
@@ -100,78 +99,77 @@ def charger_excel(chemin: str) -> list[Echantillon]:
     """
     logger.info("Chargement du fichier Excel : %s", chemin)
 
-    # Ouverture en lecture seule pour les performances et la sécurité
-    classeur = openpyxl.load_workbook(chemin, read_only=True, data_only=True)
-
-    # Vérification de la présence de la feuille cible
-    if NOM_FEUILLE not in classeur.sheetnames:
-        logger.warning(
-            "Feuille '%s' absente du classeur '%s'. Retour d'une liste vide.",
-            NOM_FEUILLE,
-            chemin,
-        )
-        classeur.close()
-        return []
-
-    feuille = classeur[NOM_FEUILLE]
     echantillons: list[Echantillon] = []
 
-    # Parcours des lignes à partir de la première ligne de données
-    for numero_ligne, row in enumerate(
-        feuille.iter_rows(min_row=PREMIERE_LIGNE_DONNEES), start=PREMIERE_LIGNE_DONNEES
-    ):
-        # Extraction de l'identifiant du prélèvement (colonne G)
-        prelevement: str = _valeur_cellule(row, COL_PRELEVEMENT)
+    # Ouverture en lecture seule — le context manager garantit la fermeture en toutes circonstances
+    # keep_vba=True permet d'ouvrir les fichiers .xlsm (Excel avec macros) sans erreur
+    with openpyxl.load_workbook(chemin, read_only=True, data_only=True, keep_vba=True) as classeur:
 
-        # On ignore les lignes dont la colonne G est vide
-        if not prelevement:
-            logger.debug("Ligne %d ignorée : colonne G vide.", numero_ligne)
-            continue
+        # Vérification de la présence de la feuille cible
+        if NOM_FEUILLE not in classeur.sheetnames:
+            logger.warning(
+                "Feuille '%s' absente du classeur '%s'. Retour d'une liste vide.",
+                NOM_FEUILLE,
+                chemin,
+            )
+            return []
 
-        # Extraction des autres champs utiles
-        description: str = _valeur_cellule(row, COL_DESCRIPTION)
-        resultat: str = _valeur_cellule(row, COL_RESULTAT)
-        localisation: str = _valeur_cellule(row, COL_LOCALISATION)
-        element_sonde: str = _valeur_cellule(row, COL_ELEMENT_SONDE)
-        reference_plan: str = _valeur_cellule(row, COL_REFERENCE_PLAN)
+        feuille = classeur[NOM_FEUILLE]
 
-        # Résolution de la couleur et de la mention selon le résultat
-        couleur, mention = resoudre_couleur(resultat)
+        # Parcours des lignes à partir de la première ligne de données
+        for numero_ligne, row in enumerate(
+            feuille.iter_rows(min_row=PREMIERE_LIGNE_DONNEES), start=PREMIERE_LIGNE_DONNEES
+        ):
+            # Extraction de l'identifiant du prélèvement (colonne G)
+            prelevement: str = _valeur_cellule(row, COL_PRELEVEMENT)
 
-        # Construction des trois lignes de texte de la bulle de légende
-        texte_ligne1, texte_ligne2, texte_ligne3 = construire_texte(
-            prelevement=prelevement,
-            description=description,
-            resultat=resultat,
-            localisation=localisation,
-            element_sonde=element_sonde,
-        )
+            # On ignore les lignes dont la colonne G est vide
+            if not prelevement:
+                logger.debug("Ligne %d ignorée : colonne G vide.", numero_ligne)
+                continue
 
-        # Instanciation de l'objet Echantillon
-        echantillon = Echantillon(
-            prelevement=prelevement,
-            description=description,
-            resultat=resultat,
-            localisation=localisation,
-            element_sonde=element_sonde,
-            reference_plan=reference_plan,
-            couleur=couleur,
-            mention=mention,
-            texte_ligne1=texte_ligne1,
-            texte_ligne2=texte_ligne2,
-            texte_ligne3=texte_ligne3,
-        )
+            # Extraction des autres champs utiles
+            description: str = _valeur_cellule(row, COL_DESCRIPTION)
+            resultat: str = _valeur_cellule(row, COL_RESULTAT)
+            localisation: str = _valeur_cellule(row, COL_LOCALISATION)
+            element_sonde: str = _valeur_cellule(row, COL_ELEMENT_SONDE)
+            reference_plan: str = _valeur_cellule(row, COL_REFERENCE_PLAN)
 
-        echantillons.append(echantillon)
-        logger.debug(
-            "Ligne %d – prélèvement '%s' chargé (résultat : '%s', mention : '%s').",
-            numero_ligne,
-            prelevement,
-            resultat,
-            mention,
-        )
+            # Résolution de la couleur et de la mention selon le résultat
+            couleur, mention = resoudre_couleur(resultat)
 
-    classeur.close()
+            # Construction des trois lignes de texte de la bulle de légende
+            texte_ligne1, texte_ligne2, texte_ligne3 = construire_texte(
+                prelevement=prelevement,
+                description=description,
+                resultat=resultat,
+                localisation=localisation,
+                element_sonde=element_sonde,
+            )
+
+            # Instanciation de l'objet Echantillon
+            echantillon = Echantillon(
+                prelevement=prelevement,
+                description=description,
+                resultat=resultat,
+                localisation=localisation,
+                element_sonde=element_sonde,
+                reference_plan=reference_plan,
+                couleur=couleur,
+                mention=mention,
+                texte_ligne1=texte_ligne1,
+                texte_ligne2=texte_ligne2,
+                texte_ligne3=texte_ligne3,
+            )
+
+            echantillons.append(echantillon)
+            logger.debug(
+                "Ligne %d – prélèvement '%s' chargé (résultat : '%s', mention : '%s').",
+                numero_ligne,
+                prelevement,
+                resultat,
+                mention,
+            )
 
     logger.info(
         "%d prélèvement(s) chargé(s) depuis '%s'.", len(echantillons), chemin
