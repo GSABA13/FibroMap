@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Plan Légendage (app)",
+      "runtimeExecutable": ".venv/Scripts/python",
+      "runtimeArgs": ["src/main.py"],
+      "port": null
+    },
+    {
+      "name": "Tests pytest",
+      "runtimeExecutable": ".venv/Scripts/pytest",
+      "runtimeArgs": ["tests/", "-v", "--tb=short"],
+      "port": null
+    }
+  ]
+}
