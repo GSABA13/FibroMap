@@ -10,7 +10,8 @@ Ce module définit la classe `Toolbar` qui expose :
             `zoom_in`, `zoom_out`, `zoom_reset`
 
 Les icônes sont générées dynamiquement via `_creer_icone()` : chaque fonction de dessin
-reçoit un QPainter et la taille cible (24px) pour tracer l'icône sur un QPixmap transparent.
+reçoit un QPainter et la taille cible (24px) pour tracer l'icône sur un QPixmap.
+Le fond des icônes est blanc par défaut, bleu clair (#E3F0FF) pour le mode actif.
 """
 
 import logging
@@ -23,7 +24,10 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QToolBar
 
-from src.utils.constantes import COULEUR_VERTE, COULEUR_ORANGE, COULEUR_ROUGE, TAILLE_ICONE_TOOLBAR
+from src.utils.constantes import (
+    COULEUR_VERTE, COULEUR_ORANGE, COULEUR_ROUGE, TAILLE_ICONE_TOOLBAR,
+    COULEUR_FOND_ICONE, COULEUR_FOND_ICONE_ACTIVE,
+)
 
 # Journalisation propre au module
 logger = logging.getLogger(__name__)
@@ -33,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Fonctions utilitaires de dessin d'icônes (module-level)
 # ==============================================================================
 
-def _creer_icone(dessin_fn, taille: int = TAILLE_ICONE_TOOLBAR) -> QIcon:
+def _creer_icone(dessin_fn, taille: int = TAILLE_ICONE_TOOLBAR, actif: bool = False) -> QIcon:
     """Génère une QIcon à partir d'une fonction de dessin QPainter.
 
     Paramètres
@@ -42,11 +46,17 @@ def _creer_icone(dessin_fn, taille: int = TAILLE_ICONE_TOOLBAR) -> QIcon:
         Fonction qui dessine l'icône sur le peintre fourni.
     taille : int
         Dimension en pixels du QPixmap carré (par défaut 24).
+    actif : bool
+        Si True, le fond est bleu clair (#E3F0FF) pour signaler le mode actif.
+        Si False (par défaut), le fond est blanc.
     """
     pixmap = QPixmap(taille, taille)
     pixmap.fill(Qt.GlobalColor.transparent)
     with QPainter(pixmap) as peintre:
         peintre.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Fond blanc ou bleu clair selon l'état actif
+        couleur_fond = COULEUR_FOND_ICONE_ACTIVE if actif else COULEUR_FOND_ICONE
+        peintre.fillRect(0, 0, taille, taille, QColor(*couleur_fond))
         dessin_fn(peintre, taille)
     return QIcon(pixmap)
 
@@ -54,7 +64,7 @@ def _creer_icone(dessin_fn, taille: int = TAILLE_ICONE_TOOLBAR) -> QIcon:
 def _creer_icone_couleur(rgb: tuple, taille: int = TAILLE_ICONE_TOOLBAR) -> QIcon:
     """
     Génère une icône disque coloré pour le sélecteur de couleur.
-    Le disque est plein avec la couleur RGB, contour noir fin.
+    Le disque est plein avec la couleur RGB, contour noir fin, sur fond blanc.
 
     Paramètres
     ----------
@@ -64,6 +74,9 @@ def _creer_icone_couleur(rgb: tuple, taille: int = TAILLE_ICONE_TOOLBAR) -> QIco
         Dimension en pixels du QPixmap carré (par défaut 24).
     """
     def dessiner(peintre: QPainter, t: int) -> None:
+        # Fond blanc
+        peintre.fillRect(0, 0, t, t, QColor(*COULEUR_FOND_ICONE))
+        # Disque coloré
         m = t // 6
         couleur = QColor(*rgb)
         peintre.setPen(QPen(Qt.GlobalColor.black, 1))
@@ -245,7 +258,9 @@ class Toolbar(QToolBar):
         self._groupe_modes = QActionGroup(self)
         self._groupe_modes.setExclusive(True)
 
-        # Création des actions de mode avec icônes dessinées via QPainter
+        # Création des actions de mode avec icônes dessinées via QPainter.
+        # Les icônes sont d'abord créées sans fond actif ; _rafraichir_icones_modes
+        # sera appelé en fin de __init__ pour appliquer le bon fond dès le démarrage.
         self._actions_mode: dict[str, QAction] = {}
         for libelle, valeur, tooltip in self._MODES:
             fn_dessin = _ICONES_MODES.get(valeur)
@@ -329,17 +344,38 @@ class Toolbar(QToolBar):
         action_zoom_moins.triggered.connect(self.zoom_out)
         action_zoom_reset.triggered.connect(self.zoom_reset)
 
+        # Initialisation du fond des icônes : sélection active au démarrage
+        self._rafraichir_icones_modes(mode_actif="selection")
+
     # ------------------------------------------------------------------
     # Slots privés
     # ------------------------------------------------------------------
 
     def _on_mode_triggered(self, action: QAction) -> None:
-        """Émet le signal `mode_change` avec la valeur interne du mode choisi."""
+        """Met à jour le mode actif, rafraîchit les icônes et émet mode_change."""
         if action.data() is None:
             logger.warning("Action de mode sans données associées.")
             return
         valeur: str = action.data()
+        # Régénérer toutes les icônes de mode avec le fond adapté (actif/inactif)
+        self._rafraichir_icones_modes(mode_actif=valeur)
         self.mode_change.emit(valeur)
+        logger.debug("Mode actif : %s", valeur)
+
+    def _rafraichir_icones_modes(self, mode_actif: str) -> None:
+        """Régénère toutes les icônes de mode avec le fond adapté (actif/inactif).
+
+        Paramètres
+        ----------
+        mode_actif : str
+            Valeur interne du mode actuellement actif (ex. "selection", "rect").
+            L'action correspondante reçoit le fond bleu clair, les autres le fond blanc.
+        """
+        for valeur, action in self._actions_mode.items():
+            fn = _ICONES_MODES.get(valeur)
+            if fn:
+                est_actif = (valeur == mode_actif)
+                action.setIcon(_creer_icone(fn, actif=est_actif))
 
     def _on_couleur_selectionnee(self) -> None:
         """Met à jour la couleur active et émet le signal couleur_change."""

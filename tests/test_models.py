@@ -4,9 +4,12 @@ Tests unitaires pour les modèles de données des formes (src/models/forme.py).
 Vérifie que les dataclasses sont correctement définies : valeurs par défaut,
 unicité des identifiants, indépendance des instances, et absence de tout
 import PyQt6 dans le module de modèles.
+
+Couvre également la logique géométrique `contient_point` de chaque sous-classe.
 """
 
 import ast
+import math
 import uuid
 import importlib
 
@@ -375,3 +378,401 @@ class TestIndependanceCouleurDefaut:
         assert forme.alpha == 128
         forme.alpha = ALPHA_PLEIN
         assert forme.alpha == 255
+
+
+# ---------------------------------------------------------------------------
+# contient_point — FormeBase (bounding-box)
+# ---------------------------------------------------------------------------
+
+class TestFormeBaseContientPoint:
+    """
+    Vérifie l'implémentation par défaut de contient_point dans FormeBase :
+    test de bounding-box avec tolérance sur les points de contrôle.
+    """
+
+    def test_liste_vide_retourne_faux(self):
+        """Sans points, contient_point doit retourner False."""
+        forme = FormeBase(points=[])
+        assert forme.contient_point(0.0, 0.0) is False
+
+    def test_point_interieur_bounding_box(self):
+        """Un point situé à l'intérieur de la bounding-box est détecté."""
+        forme = FormeBase(points=[(10.0, 10.0), (90.0, 80.0)])
+        assert forme.contient_point(50.0, 45.0) is True
+
+    def test_point_exterieur_bounding_box(self):
+        """Un point clairement en dehors n'est pas détecté."""
+        forme = FormeBase(points=[(10.0, 10.0), (90.0, 80.0)])
+        assert forme.contient_point(200.0, 200.0) is False
+
+    def test_point_dans_la_tolerance(self):
+        """Un point légèrement en dehors de la bounding-box, mais dans la tolérance."""
+        # bounding-box : x=[10,90], y=[10,80]. Avec tolerance=5, bord gauche à 5.0
+        forme = FormeBase(points=[(10.0, 10.0), (90.0, 80.0)])
+        assert forme.contient_point(6.0, 45.0, tolerance=5.0) is True
+
+    def test_point_hors_tolerance(self):
+        """Un point à exactement tolérance+1 en dehors est rejeté."""
+        forme = FormeBase(points=[(10.0, 10.0), (90.0, 80.0)])
+        assert forme.contient_point(4.0, 45.0, tolerance=5.0) is False
+
+    def test_tolerance_nulle(self):
+        """Avec tolérance=0, seul le point exactement sur la bounding-box est accepté."""
+        forme = FormeBase(points=[(10.0, 10.0), (90.0, 80.0)])
+        assert forme.contient_point(10.0, 10.0, tolerance=0.0) is True
+        assert forme.contient_point(9.9, 10.0, tolerance=0.0) is False
+
+    def test_un_seul_point(self):
+        """Avec un seul point, la bounding-box est dégénérée ; le point exact est dedans."""
+        forme = FormeBase(points=[(50.0, 50.0)])
+        assert forme.contient_point(50.0, 50.0, tolerance=0.0) is True
+
+    def test_un_seul_point_dans_tolerance(self):
+        """Avec un seul point, un test dans la tolérance est positif."""
+        forme = FormeBase(points=[(50.0, 50.0)])
+        assert forme.contient_point(53.0, 50.0, tolerance=5.0) is True
+
+    def test_un_seul_point_hors_tolerance(self):
+        """Avec un seul point, un test hors tolérance est négatif."""
+        forme = FormeBase(points=[(50.0, 50.0)])
+        assert forme.contient_point(60.0, 50.0, tolerance=5.0) is False
+
+
+# ---------------------------------------------------------------------------
+# contient_point — FormeCercle
+# ---------------------------------------------------------------------------
+
+class TestFormeCercleContientPoint:
+    """
+    Vérifie la détection de hit sur un cercle.
+    Le cercle est défini par centre=points[0] et point de bord=points[1].
+    """
+
+    def _cercle_rayon_30(self):
+        """Cercle centré en (50, 50) avec rayon 30 (bord en (80, 50))."""
+        return FormeCercle(points=[(50.0, 50.0), (80.0, 50.0)])
+
+    def test_point_au_centre(self):
+        """Le centre appartient au cercle."""
+        forme = self._cercle_rayon_30()
+        assert forme.contient_point(50.0, 50.0) is True
+
+    def test_point_interieur(self):
+        """Un point clairement à l'intérieur du disque."""
+        forme = self._cercle_rayon_30()
+        assert forme.contient_point(60.0, 50.0) is True
+
+    def test_point_sur_le_bord_exact(self):
+        """Un point exactement sur le bord (distance = rayon) est dans le cercle."""
+        forme = self._cercle_rayon_30()
+        # Distance = 30, rayon = 30 → doit être accepté avec tolérance=0
+        assert forme.contient_point(80.0, 50.0, tolerance=0.0) is True
+
+    def test_point_dans_la_tolerance_hors_bord(self):
+        """Un point légèrement au-delà du bord mais dans la tolérance est accepté."""
+        forme = self._cercle_rayon_30()
+        # Distance de (50,50) à (83, 50) = 33, rayon=30, tolerance=5 → 33 <= 35
+        assert forme.contient_point(83.0, 50.0, tolerance=5.0) is True
+
+    def test_point_hors_cercle_et_tolerance(self):
+        """Un point nettement hors du cercle et de la tolérance est rejeté."""
+        forme = self._cercle_rayon_30()
+        # Distance de (50,50) à (150, 50) = 100 > 30+5
+        assert forme.contient_point(150.0, 50.0, tolerance=5.0) is False
+
+    def test_point_a_45_degres_interieur(self):
+        """Un point à 45° à l'intérieur du disque."""
+        forme = self._cercle_rayon_30()
+        # distance = 20*sqrt(2) ≈ 28.28 < 30
+        assert forme.contient_point(50.0 + 20.0, 50.0 + 20.0) is True
+
+    def test_point_a_45_degres_exterieur(self):
+        """Un point à 45° à l'extérieur du disque, hors tolérance."""
+        forme = self._cercle_rayon_30()
+        # distance = 25*sqrt(2) ≈ 35.36 > 30+5
+        assert forme.contient_point(50.0 + 25.0, 50.0 + 25.0, tolerance=5.0) is False
+
+    def test_moins_de_deux_points_retourne_faux(self):
+        """Un cercle sans 2 points retourne toujours False."""
+        forme = FormeCercle(points=[(50.0, 50.0)])
+        assert forme.contient_point(50.0, 50.0) is False
+
+    def test_liste_vide_retourne_faux(self):
+        """Un cercle sans points retourne toujours False."""
+        forme = FormeCercle(points=[])
+        assert forme.contient_point(0.0, 0.0) is False
+
+    def test_rayon_nul_point_sur_centre(self):
+        """Cercle de rayon 0 : seul le centre exact est dans la tolérance nulle."""
+        forme = FormeCercle(points=[(50.0, 50.0), (50.0, 50.0)])
+        assert forme.contient_point(50.0, 50.0, tolerance=0.0) is True
+        assert forme.contient_point(51.0, 50.0, tolerance=0.0) is False
+
+
+# ---------------------------------------------------------------------------
+# contient_point — FormeLigne
+# ---------------------------------------------------------------------------
+
+class TestFormeLigneContientPoint:
+    """
+    Vérifie la détection de hit sur un segment de droite.
+    La distance est calculée par projection orthogonale.
+    """
+
+    def _segment_horizontal(self):
+        """Segment de (0, 0) à (100, 0)."""
+        return FormeLigne(points=[(0.0, 0.0), (100.0, 0.0)])
+
+    def test_point_sur_le_segment_au_milieu(self):
+        """Un point exactement sur le segment est détecté."""
+        forme = self._segment_horizontal()
+        assert forme.contient_point(50.0, 0.0, tolerance=0.0) is True
+
+    def test_point_sur_le_segment_a_lextrémite(self):
+        """Le premier point du segment est détecté."""
+        forme = self._segment_horizontal()
+        assert forme.contient_point(0.0, 0.0, tolerance=0.0) is True
+
+    def test_point_sur_le_segment_au_bout(self):
+        """Le dernier point du segment est détecté."""
+        forme = self._segment_horizontal()
+        assert forme.contient_point(100.0, 0.0, tolerance=0.0) is True
+
+    def test_point_perpendiculaire_dans_tolerance(self):
+        """Un point à 3px du segment (perpendiculaire) avec tolérance=5 est accepté."""
+        forme = self._segment_horizontal()
+        assert forme.contient_point(50.0, 3.0, tolerance=5.0) is True
+
+    def test_point_perpendiculaire_hors_tolerance(self):
+        """Un point à 10px du segment avec tolérance=5 est rejeté."""
+        forme = self._segment_horizontal()
+        assert forme.contient_point(50.0, 10.0, tolerance=5.0) is False
+
+    def test_point_en_dehors_de_la_projection(self):
+        """
+        Un point situé après l'extrémité du segment (hors projection).
+        La distance est calculée vers l'extrémité la plus proche.
+        """
+        forme = self._segment_horizontal()
+        # Point (110, 0) : projection clampée à t=1 → distance vers (100,0) = 10 > 5
+        assert forme.contient_point(110.0, 0.0, tolerance=5.0) is False
+
+    def test_point_pres_extremite_dans_tolerance(self):
+        """Un point très proche d'une extrémité est accepté selon la tolérance."""
+        forme = self._segment_horizontal()
+        # Point (103, 0) : distance vers (100,0) = 3 <= 5
+        assert forme.contient_point(103.0, 0.0, tolerance=5.0) is True
+
+    def test_segment_diagonal(self):
+        """Test sur un segment diagonal."""
+        # Segment de (0,0) à (100,100) — la diagonale
+        forme = FormeLigne(points=[(0.0, 0.0), (100.0, 100.0)])
+        # Point (50,50) est exactement sur le segment
+        assert forme.contient_point(50.0, 50.0, tolerance=0.0) is True
+
+    def test_segment_diagonal_point_a_cote(self):
+        """Un point nettement à côté d'un segment diagonal est rejeté."""
+        forme = FormeLigne(points=[(0.0, 0.0), (100.0, 100.0)])
+        # Point (0, 50) est à 35px environ de la diagonale
+        assert forme.contient_point(0.0, 50.0, tolerance=5.0) is False
+
+    def test_moins_de_deux_points_retourne_faux(self):
+        """Un segment avec un seul point retourne False."""
+        forme = FormeLigne(points=[(0.0, 0.0)])
+        assert forme.contient_point(0.0, 0.0) is False
+
+    def test_liste_vide_retourne_faux(self):
+        """Un segment sans points retourne False."""
+        forme = FormeLigne(points=[])
+        assert forme.contient_point(0.0, 0.0) is False
+
+    def test_segment_degenere_deux_points_identiques(self):
+        """Segment dégénéré (deux points identiques) : se comporte comme un point."""
+        forme = FormeLigne(points=[(50.0, 50.0), (50.0, 50.0)])
+        assert forme.contient_point(50.0, 50.0, tolerance=0.0) is True
+        assert forme.contient_point(60.0, 50.0, tolerance=5.0) is False
+
+
+# ---------------------------------------------------------------------------
+# contient_point — FormeLignesConnectees
+# ---------------------------------------------------------------------------
+
+class TestFormeLignesConnecteesContientPoint:
+    """
+    Vérifie la détection de hit sur une polyligne (série de segments).
+    """
+
+    def _polyligne_en_l(self):
+        """Polyligne en L : (0,0) → (100,0) → (100,100)."""
+        return FormeLignesConnectees(points=[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)])
+
+    def test_point_sur_premier_segment(self):
+        """Un point sur le premier segment est détecté."""
+        forme = self._polyligne_en_l()
+        assert forme.contient_point(50.0, 0.0, tolerance=0.0) is True
+
+    def test_point_sur_deuxieme_segment(self):
+        """Un point sur le second segment est détecté."""
+        forme = self._polyligne_en_l()
+        assert forme.contient_point(100.0, 50.0, tolerance=0.0) is True
+
+    def test_point_entre_deux_segments_hors_tolerance(self):
+        """Un point entre les deux segments mais hors tolérance est rejeté."""
+        forme = self._polyligne_en_l()
+        # Point (50, 50) : distance au segment 1 = 50, distance au segment 2 = 50 → rejeté avec tol=5
+        assert forme.contient_point(50.0, 50.0, tolerance=5.0) is False
+
+    def test_point_sur_le_coude(self):
+        """Le point de coude (100, 0) appartient aux deux segments."""
+        forme = self._polyligne_en_l()
+        assert forme.contient_point(100.0, 0.0, tolerance=0.0) is True
+
+    def test_point_dans_tolerance_premier_segment(self):
+        """Un point proche du premier segment (dans la tolérance) est accepté."""
+        forme = self._polyligne_en_l()
+        assert forme.contient_point(50.0, 3.0, tolerance=5.0) is True
+
+    def test_point_hors_de_la_polyligne(self):
+        """Un point nettement en dehors de tous les segments est rejeté."""
+        forme = self._polyligne_en_l()
+        assert forme.contient_point(200.0, 200.0, tolerance=5.0) is False
+
+    def test_un_seul_point_dans_tolerance(self):
+        """Une polyligne d'un seul point : test de distance pure."""
+        forme = FormeLignesConnectees(points=[(50.0, 50.0)])
+        assert forme.contient_point(53.0, 50.0, tolerance=5.0) is True
+
+    def test_un_seul_point_hors_tolerance(self):
+        """Une polyligne d'un seul point hors tolérance est rejetée."""
+        forme = FormeLignesConnectees(points=[(50.0, 50.0)])
+        assert forme.contient_point(60.0, 50.0, tolerance=5.0) is False
+
+    def test_liste_vide_retourne_faux(self):
+        """Une polyligne sans points retourne False."""
+        forme = FormeLignesConnectees(points=[])
+        assert forme.contient_point(0.0, 0.0) is False
+
+    def test_polyligne_trois_segments(self):
+        """Test sur une polyligne avec trois segments consécutifs."""
+        forme = FormeLignesConnectees(
+            points=[(0.0, 0.0), (50.0, 50.0), (100.0, 0.0), (150.0, 50.0)]
+        )
+        # Point sur le troisième segment, entre (100,0) et (150,50)
+        assert forme.contient_point(125.0, 25.0, tolerance=1.0) is True
+
+
+# ---------------------------------------------------------------------------
+# contient_point — FormePolygone
+# ---------------------------------------------------------------------------
+
+class TestFormePolygoneContientPoint:
+    """
+    Vérifie la détection de hit sur un polygone fermé.
+    Deux mécanismes : test des bords (distance ≤ tolérance) et ray casting intérieur.
+    """
+
+    def _carre_100(self):
+        """Carré de 100px de côté centré sur l'origine : (0,0)-(100,0)-(100,100)-(0,100)."""
+        return FormePolygone(points=[
+            (0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)
+        ])
+
+    # --- Tests intérieur (ray casting) ---
+
+    def test_point_strictement_interieur(self):
+        """Un point clairement à l'intérieur du carré est détecté."""
+        forme = self._carre_100()
+        assert forme.contient_point(50.0, 50.0) is True
+
+    def test_point_centre_exact(self):
+        """Le centre géométrique du carré est à l'intérieur."""
+        forme = self._carre_100()
+        assert forme.contient_point(50.0, 50.0, tolerance=0.0) is True
+
+    def test_point_strictement_exterieur(self):
+        """Un point clairement en dehors du carré est rejeté."""
+        forme = self._carre_100()
+        assert forme.contient_point(200.0, 200.0, tolerance=0.0) is False
+
+    def test_point_exterieur_negatif(self):
+        """Un point avec des coordonnées négatives est hors du carré."""
+        forme = self._carre_100()
+        assert forme.contient_point(-50.0, -50.0, tolerance=0.0) is False
+
+    # --- Tests bords ---
+
+    def test_point_sur_bord_haut(self):
+        """Un point exactement sur le bord supérieur est détecté."""
+        forme = self._carre_100()
+        assert forme.contient_point(50.0, 0.0, tolerance=0.0) is True
+
+    def test_point_sur_bord_gauche(self):
+        """Un point exactement sur le bord gauche est détecté."""
+        forme = self._carre_100()
+        assert forme.contient_point(0.0, 50.0, tolerance=0.0) is True
+
+    def test_point_dans_tolerance_bord(self):
+        """Un point légèrement à l'extérieur du bord mais dans la tolérance."""
+        forme = self._carre_100()
+        # Point (50, -3) : à 3px du bord supérieur, tolérance=5 → accepté
+        assert forme.contient_point(50.0, -3.0, tolerance=5.0) is True
+
+    def test_point_hors_tolerance_bord(self):
+        """Un point au-delà de la tolérance du bord est rejeté."""
+        forme = self._carre_100()
+        # Point (50, -10) : à 10px du bord supérieur, tolérance=5 → rejeté
+        assert forme.contient_point(50.0, -10.0, tolerance=5.0) is False
+
+    def test_coin_dans_tolerance(self):
+        """Un coin du polygone est dans sa propre tolérance."""
+        forme = self._carre_100()
+        assert forme.contient_point(0.0, 0.0, tolerance=0.0) is True
+
+    # --- Tests avec des polygones variés ---
+
+    def test_triangle_point_interieur(self):
+        """Un point à l'intérieur d'un triangle rectangle."""
+        forme = FormePolygone(points=[(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)])
+        assert forme.contient_point(20.0, 20.0, tolerance=0.0) is True
+
+    def test_triangle_point_exterieur(self):
+        """Un point hors du triangle rectangle."""
+        forme = FormePolygone(points=[(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)])
+        assert forme.contient_point(80.0, 80.0, tolerance=0.0) is False
+
+    def test_polygone_deux_points_test_bord(self):
+        """Un polygone dégénéré à 2 points ne fait pas de ray casting mais teste les bords."""
+        forme = FormePolygone(points=[(0.0, 0.0), (100.0, 0.0)])
+        # Le point sur le segment dégénéré est détecté via le test de bord
+        assert forme.contient_point(50.0, 0.0, tolerance=0.0) is True
+
+    def test_liste_vide_retourne_faux(self):
+        """Un polygone sans points retourne False."""
+        forme = FormePolygone(points=[])
+        assert forme.contient_point(0.0, 0.0) is False
+
+    def test_un_seul_point_retourne_faux(self):
+        """Un polygone d'un seul point retourne False (condition len < 2)."""
+        forme = FormePolygone(points=[(50.0, 50.0)])
+        assert forme.contient_point(50.0, 50.0) is False
+
+    def test_polygone_non_convexe_point_interieur(self):
+        """Un polygone en forme de L : un point dans le creux intérieur."""
+        # Polygone en L (vue de dessus) : intérieur complexe
+        forme = FormePolygone(points=[
+            (0.0, 0.0), (60.0, 0.0), (60.0, 40.0),
+            (100.0, 40.0), (100.0, 100.0), (0.0, 100.0)
+        ])
+        # Point dans la partie basse du L
+        assert forme.contient_point(80.0, 70.0, tolerance=0.0) is True
+        # Point dans la partie haute du L
+        assert forme.contient_point(30.0, 20.0, tolerance=0.0) is True
+
+    def test_polygone_non_convexe_point_exterieur_dans_creux(self):
+        """Un polygone en L : un point dans le creux (extérieur) est rejeté."""
+        forme = FormePolygone(points=[
+            (0.0, 0.0), (60.0, 0.0), (60.0, 40.0),
+            (100.0, 40.0), (100.0, 100.0), (0.0, 100.0)
+        ])
+        # Point dans le creux haut-droit du L : (80, 20) est hors du polygone
+        assert forme.contient_point(80.0, 20.0, tolerance=0.0) is False

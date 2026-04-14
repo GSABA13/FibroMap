@@ -191,7 +191,7 @@ class TestEntetesIgnorees:
     On vérifie que iter_rows est appelé avec min_row=3.
     """
 
-    def test_iter_rows_demarre_a_la_ligne_3(self):
+    def test_iter_rows_demarre_a_la_ligne_5(self):
         feuille_mock = MagicMock()
         feuille_mock.iter_rows.return_value = iter([])
 
@@ -205,7 +205,7 @@ class TestEntetesIgnorees:
         with patch("src.services.excel_reader.openpyxl.load_workbook", return_value=classeur_mock):
             charger_excel("fictif.xlsx")
 
-        feuille_mock.iter_rows.assert_called_once_with(min_row=3)
+        feuille_mock.iter_rows.assert_called_once_with(min_row=5)
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,69 @@
+# Règle de réflexion et d'utilisation des sous agents
+
+1. Think Before Coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+Before implementing:
+
+    State your assumptions explicitly. If uncertain, ask.
+    If multiple interpretations exist, present them - don't pick silently.
+    If a simpler approach exists, say so. Push back when warranted.
+    If something is unclear, stop. Name what's confusing. Ask.
+
+2. Simplicity First
+
+Minimum code that solves the problem. Nothing speculative.
+
+    No features beyond what was asked.
+    No abstractions for single-use code.
+    No "flexibility" or "configurability" that wasn't requested.
+    No error handling for impossible scenarios.
+    If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+3. Surgical Changes
+
+Touch only what you must. Clean up only your own mess.
+
+When editing existing code:
+
+    Don't "improve" adjacent code, comments, or formatting.
+    Don't refactor things that aren't broken.
+    Match existing style, even if you'd do it differently.
+    If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+    Remove imports/variables/functions that YOUR changes made unused.
+    Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+4. Goal-Driven Execution
+
+Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals:
+
+    "Add validation" → "Write tests for invalid inputs, then make them pass"
+    "Fix the bug" → "Write a test that reproduces it, then make it pass"
+    "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+
+### Séparation stricte des responsabilités
+- `ui-ux`, `excel-reader`, `pdf-exporter` : produisent du code, 
+   ne lancent JAMAIS pytest
+- `code-reviewer` : seul agent autorisé à lancer pytest, 
+   invoqué uniquement via /test ou appel explicite
+
 # Plan Légendage Amiante — Règles du projet
 
 ## Contexte métier
@@ -167,8 +233,27 @@ Types disponibles : Cercle, Rectangle, Ligne, Lignes connectées, Polygone
 
 ---
 
+## Export PDF — Contrainte métier NON NÉGOCIABLE
+
+Le fichier PDF final est ouvert dans **Adobe Acrobat** pour exploitation ultérieure.
+Les formes et bulles DOIVENT être des **annotations PDF natives** (pas dessinées sur le flux de contenu) :
+
+| Objet           | Annotation PDF              |
+|-----------------|-----------------------------|
+| FormeRect       | `/Subtype /Square`          |
+| FormeCercle     | `/Subtype /Circle`          |
+| FormeLigne / FormePolygone / FormeLignesConnectees | `/Subtype /PolyLine` |
+| BulleLegende    | `/Subtype /FreeText`        |
+
+- Implémentation : utiliser `reportlab.pdfbase.pdfdoc.PDFDictionary` / `PDFArray` / `PDFName` pour construire les objets annotation, puis `canvas._addAnnotation(obj)` pour les injecter dans le /Annots de la page.
+- Adobe Acrobat génère automatiquement les /AP (Appearance Streams) à l'ouverture — ne pas les générer manuellement.
+- **Ne jamais** remplacer les annotations par du dessin sur le flux de contenu — c'est une régression métier.
+
+---
+
 ## Ce que Claude NE doit PAS faire
 - Ne jamais générer de sauvegarde de projet (pas de format .json ou autre) — l'export PDF est le seul output
 - Ne pas implémenter de détection automatique des zones sur le plan (tout est manuel)
 - Ne pas utiliser tkinter — uniquement PyQt6
 - Ne pas mélanger la logique métier dans les fichiers UI
+- Ne jamais convertir les annotations PDF en dessin sur le flux de contenu

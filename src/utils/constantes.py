@@ -33,14 +33,26 @@ ALPHA_SEMI: int = 128
 # Dimensions des bulles de légende (CallOut)
 # ---------------------------------------------------------------------------
 
-# Largeur d'une bulle en pixels
+# Largeur d'une bulle en pixels (valeur de base avant facteur d'agrandissement)
 LARGEUR_BULLE: int = 120   # px
 
-# Hauteur d'une ligne de texte dans la bulle
-HAUTEUR_LIGNE: int = 14    # px
+# Facteur multiplicateur de la largeur par défaut (1.2 × 1.2 = 1.44, soit +44%)
+FACTEUR_LARGEUR_BULLE: float = 1.44
+
+# Hauteur d'une ligne de texte dans la bulle — calibrée sur Helvetica 8pt à 96 DPI
+HAUTEUR_LIGNE: int = 12    # px  (était 14 pour 9pt)
+
+# Facteur d'interligne appliqué à HAUTEUR_LIGNE pour le calcul de hauteur de bulle
+FACTEUR_INTERLIGNE: float = 1.4
 
 # Marge intérieure (padding) de la bulle
 PADDING_BULLE: int = 12    # px
+
+# Longueur par défaut du pied perpendiculaire du call-out (en pixels image)
+PIED_LONGUEUR_DEFAUT: float = 20.0   # px
+
+# Largeur moyenne d'un glyphe à 8pt / 96 DPI, utilisée pour l'estimation du word-wrap
+LARGEUR_GLYPHE_MOYEN: float = 5.5    # px  (était 6.5 pour 9pt)
 
 # ---------------------------------------------------------------------------
 # Poignées de sélection (handles de redimensionnement)
@@ -84,6 +96,13 @@ COULEUR_FOND_CANVAS: tuple[int, int, int] = (232, 232, 232)
 # Couleur du texte d'invite affiché quand aucun plan n'est chargé
 COULEUR_TEXTE_INVITE: tuple[int, int, int] = (136, 136, 136)
 
+# Lasso de sélection
+COULEUR_LASSO: tuple[int, int, int] = (0, 120, 215)    # Bleu Windows
+ALPHA_LASSO: int = 30                                   # Transparence du fond lasso
+
+# Ghost polygone / lignes connectées
+RAYON_POINT_GHOST: float = 4.0    # Rayon des disques marquant les points validés (px)
+
 # Zoom
 ZOOM_MIN: float = 0.10             # Facteur de zoom minimal (10%)
 ZOOM_MAX: float = 5.00             # Facteur de zoom maximal (500%)
@@ -101,3 +120,5 @@ MARGE_PANNEAU: int = 4             # Marges et espacement des panneaux latéraux
 
 # --- Toolbar ---
 TAILLE_ICONE_TOOLBAR: int = 24     # Taille des icônes dessinées dans la barre d'outils (px)
+COULEUR_FOND_ICONE: tuple[int, int, int] = (255, 255, 255)        # Fond blanc des icônes
+COULEUR_FOND_ICONE_ACTIVE: tuple[int, int, int] = (227, 240, 255)  # Fond bleu clair #E3F0FF

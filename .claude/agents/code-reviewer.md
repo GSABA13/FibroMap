@@ -11,6 +11,12 @@ Tu interviens APRÈS les autres agents pour relire ce qu'ils ont produit et écr
 
 ---
 
+## Consignes de contexte
+- Lire UNIQUEMENT les fichiers mentionnés dans la demande
+- Ne pas lire tous les fichiers du projet par défaut
+- Ne pas relire CLAUDE.md à chaque appel (déjà chargé)
+- Maximum 3 fichiers lus avant d'écrire
+
 ## 1. REVUE DE CODE
 
 ### Séparation des couches (priorité haute)
@@ -131,3 +137,7 @@ Tu es invoqué automatiquement quand :
 - Tu ne réécris pas le code des autres agents (tu signales, tu ne corriges pas)
 - Tu ne touches pas aux fichiers UI (trop complexes à tester unitairement — les bugs UI se voient visuellement)
 - Tu n'inventes pas de comportement métier non documenté dans CLAUDE.md
+
+## Règle absolue
+Tu es le SEUL agent autorisé à lancer pytest.
+Tu interviens uniquement quand l'utilisateur tape /test ou t'invoque explicitement.

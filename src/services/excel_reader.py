@@ -53,7 +53,8 @@ COL_RESULTAT: int = 9        # I
 COL_REFERENCE_PLAN: int = 15  # O
 
 # Numéro de la première ligne de données (après les en-têtes)
-PREMIERE_LIGNE_DONNEES: int = 3
+# Les 4 premières lignes sont réservées aux en-têtes du fichier Excel
+PREMIERE_LIGNE_DONNEES: int = 5
 
 
 def _valeur_cellule(row: tuple, index_1base: int) -> str:
@@ -101,10 +102,11 @@ def charger_excel(chemin: str) -> list[Echantillon]:
 
     echantillons: list[Echantillon] = []
 
-    # Ouverture en lecture seule — le context manager garantit la fermeture en toutes circonstances
+    # openpyxl 3.x ne supporte pas le context manager sur load_workbook
+    # → on utilise try/finally pour garantir la fermeture dans tous les cas
     # keep_vba=True permet d'ouvrir les fichiers .xlsm (Excel avec macros) sans erreur
-    with openpyxl.load_workbook(chemin, read_only=True, data_only=True, keep_vba=True) as classeur:
-
+    classeur = openpyxl.load_workbook(chemin, read_only=True, data_only=True, keep_vba=True)
+    try:
         # Vérification de la présence de la feuille cible
         if NOM_FEUILLE not in classeur.sheetnames:
             logger.warning(
@@ -170,8 +172,27 @@ def charger_excel(chemin: str) -> list[Echantillon]:
                 resultat,
                 mention,
             )
+    finally:
+        classeur.close()
 
     logger.info(
         "%d prélèvement(s) chargé(s) depuis '%s'.", len(echantillons), chemin
     )
+
+    # Log de diagnostic — vérification du chargement
+    logger.info("[DIAGNOSTIC] %d échantillon(s) chargé(s) depuis '%s'", len(echantillons), chemin)
+    if echantillons:
+        premier = echantillons[0]
+        logger.debug(
+            "[DIAGNOSTIC] Premier échantillon — prélèvement='%s', localisation='%s', "
+            "résultat='%s', mention='%s', couleur=%s",
+            premier.prelevement,
+            premier.localisation,
+            premier.resultat,
+            premier.mention,
+            premier.couleur,
+        )
+    else:
+        logger.warning("[DIAGNOSTIC] Liste d'échantillons VIDE après lecture de '%s'", chemin)
+
     return echantillons
