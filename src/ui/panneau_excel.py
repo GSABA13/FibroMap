@@ -186,10 +186,12 @@ class PanneauExcel(QWidget):
     # ------------------------------------------------------------------
 
     def _rafraichir_liste(self) -> None:
-        """Vide et repeuple le QListWidget selon le filtre actif."""
+        """Vide et repeuple le QListWidget selon le filtre actif, en conservant la position de scroll."""
+        position_scroll = self._liste.verticalScrollBar().value()
         self._liste.clear()
         for ech in self._echantillons_filtres():
             self._ajouter_ligne(ech)
+        self._liste.verticalScrollBar().setValue(position_scroll)
 
     def _echantillons_filtres(self) -> list:
         """
