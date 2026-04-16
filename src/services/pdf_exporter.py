@@ -351,7 +351,8 @@ def _dessiner_planche(c: rl_canvas.Canvas, planche: Planche) -> None:
     if extension == ".pdf":
         # Conversion PDF → image PIL via pdf2image (première page uniquement)
         from pdf2image import convert_from_path  # import local évitant une dépendance globale
-        pages = convert_from_path(chemin, dpi=150)
+        from src.utils.pdf_to_image import _chemin_poppler
+        pages = convert_from_path(chemin, dpi=150, poppler_path=_chemin_poppler())
         img_pil = pages[0]
     else:
         img_pil = Image.open(chemin).convert("RGBA")
