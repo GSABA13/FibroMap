@@ -30,6 +30,7 @@ class FormeBase:
     )  # RGB (vert par défaut)
     alpha: int = field(default=ALPHA_PLEIN)    # 255=plein, 128=semi-transparent
     points: list[tuple[float, float]] = field(default_factory=list)
+    epaisseur: float = field(default=2.0)      # Épaisseur du trait/contour (px canvas / pt PDF)
 
     def contient_point(self, px: float, py: float, tolerance: float = 5.0) -> bool:
         """

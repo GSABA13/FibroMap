@@ -15,15 +15,14 @@ Modes de dessin disponibles (voir `ModeCanvas`) :
     ModeCanvas.DESSIN_POLYGONE   : polygone fermé (N clics + double-clic)
     ModeCanvas.LIGNES_CONNECTEES : polyligne ouverte (N clics + double-clic)
     ModeCanvas.CALLOUT           : bulle de légende (deux clics)
-    ModeCanvas.ROGNAGE           : définition de la zone de rognage (cliquer-glisser)
 
 Système de coordonnées
 ----------------------
 Toutes les formes stockent leurs points en **coordonnées image originale**.
 La conversion canvas ↔ image passe par les méthodes `_canvas_vers_image` et
-`_image_vers_canvas`, qui tiennent compte du rognage, du zoom et du centrage
-automatique du plan dans la zone canvas. Les attributs `_rect_affichage` et
-`_echelle` sont recalculés à chaque `paintEvent` et utilisés par ces fonctions.
+`_image_vers_canvas`, qui tiennent compte du zoom et du centrage automatique
+du plan dans la zone canvas. Les attributs `_rect_affichage` et `_echelle`
+sont recalculés à chaque `paintEvent` et utilisés par ces fonctions.
 """
 
 import copy
@@ -99,7 +98,6 @@ class ModeCanvas(str, Enum):
     DESSIN_POLYGONE   = "polygone"
     LIGNES_CONNECTEES = "lignes_connectees"
     CALLOUT           = "callout"
-    ROGNAGE           = "rognage"
 
 
 class CanvasWidget(QWidget):
@@ -144,10 +142,6 @@ class CanvasWidget(QWidget):
         (coordonnées canvas). Mis à jour à chaque paintEvent.
     _echelle : float
         Facteur pixels_canvas / pixels_image. Mis à jour à chaque paintEvent.
-    _rect_rognage : QRectF | None
-        Rectangle de rognage en coordonnées image originale (None = pas de rognage).
-    _rognage_en_cours : QPointF | None
-        Point de départ du tracé de rognage en cours (coordonnées canvas).
     _bulles : list[BulleLegende]
         Toutes les bulles de légende call-out de la planche courante.
     _bulle_selectionnee : BulleLegende | None
@@ -161,8 +155,17 @@ class CanvasWidget(QWidget):
     # Signal émis quand le zoom change, avec la valeur (0.0–5.0)
     zoom_change = pyqtSignal(float)
 
+    # Signal émis quand Échap est pressé (demande de retour en mode sélection)
+    retour_selection = pyqtSignal()
+
+    # Signal émis quand une ou plusieurs bulles sont supprimées
+    bulle_supprimee = pyqtSignal()
+
     # Signal émis après création d'une bulle call-out (ou demande de changement d'échantillon)
     bulle_creee = pyqtSignal(object)
+
+    # Signal émis quand une seule forme est sélectionnée, avec son épaisseur
+    epaisseur_selection_change = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -178,8 +181,9 @@ class CanvasWidget(QWidget):
         # --- Transparence (conservé pour compatibilité) ---
         self._semi_transparent: bool = False
 
-        # --- Couleur et transparence actives ---
+        # --- Couleur, transparence et épaisseur actives ---
         self._couleur_active: tuple = COULEUR_VERTE   # RGB tuple — couleur de la prochaine forme
+        self._epaisseur_active: float = float(EPAISSEUR_TRAIT)  # Épaisseur du prochain tracé
 
         # --- Formes dessinées ---
         # Les points sont stockés en coordonnées image originale
@@ -206,15 +210,15 @@ class CanvasWidget(QWidget):
 
         # --- Zoom ---
         self._zoom: float = ZOOM_DEFAUT          # Facteur de zoom courant
+        self._pan_offset: QPointF = QPointF(0.0, 0.0)  # décalage de défilement en pixels canvas
+        self._pan_en_cours: bool = False
+        self._pan_debut: QPoint | None = None
+        self._pan_offset_debut: QPointF = QPointF(0.0, 0.0)
 
         # --- Système de coordonnées centralisé ---
         # Mis à jour dans paintEvent ; utilisés par _canvas_vers_image / _image_vers_canvas
         self._rect_affichage: QRectF = QRectF()  # rectangle du plan dans le canvas
         self._echelle: float = 1.0               # facteur pixels_canvas / pixels_image
-
-        # --- Rognage ---
-        self._rect_rognage: QRectF | None = None       # en coordonnées image originale
-        self._rognage_en_cours: QPointF | None = None  # point de départ (coordonnées canvas)
 
         # --- Bulles call-out ---
         self._bulles: list[BulleLegende] = []
@@ -253,6 +257,28 @@ class CanvasWidget(QWidget):
         """
         self._echantillon_en_attente = echantillon
         logger.debug("Échantillon en attente défini : %s", echantillon.prelevement if echantillon else None)
+
+    def _emettre_epaisseur_selection(self) -> None:
+        """Émet epaisseur_selection_change si exactement une forme est sélectionnée."""
+        if len(self._formes_selectionnees) == 1:
+            self.epaisseur_selection_change.emit(int(self._formes_selectionnees[0].epaisseur))
+
+    def definir_epaisseur(self, epaisseur: int) -> None:
+        """
+        Mémorise l'épaisseur de trait active pour les prochaines formes.
+        Si des formes sont sélectionnées, leur épaisseur est mise à jour immédiatement.
+
+        Paramètres
+        ----------
+        epaisseur : int
+            Épaisseur en pixels (canvas) / points (PDF).
+        """
+        self._epaisseur_active = float(epaisseur)
+        if self._formes_selectionnees:
+            for forme in self._formes_selectionnees:
+                forme.epaisseur = self._epaisseur_active
+            self.update()
+        logger.debug("Épaisseur active : %s px", epaisseur)
 
     def charger_plan(self, chemin: str) -> None:
         """
@@ -293,7 +319,7 @@ class CanvasWidget(QWidget):
         Paramètres
         ----------
         mode : str
-            Identifiant du mode (ex. "rect", "cercle", "selection", "rognage", …).
+            Identifiant du mode (ex. "rect", "cercle", "selection", "callout", …).
         """
         self._mode = ModeCanvas(mode)
         # Abandon d'un tracé en cours si on change de mode — remise à zéro complète
@@ -401,14 +427,14 @@ class CanvasWidget(QWidget):
 
     def zoom_reset(self) -> None:
         """Remet le zoom à 100% et recentre l'image."""
+        self._pan_offset = QPointF(0.0, 0.0)
         self._appliquer_zoom(ZOOM_DEFAUT, centre_canvas=None)
 
     def _appliquer_zoom(self, nouveau_zoom: float, centre_canvas: QPointF | None = None) -> None:
         """
         Applique le facteur de zoom en le clampant entre ZOOM_MIN et ZOOM_MAX.
-
-        Avec le nouveau système de coordonnées, l'offset de centrage est calculé
-        automatiquement dans paintEvent — aucun attribut d'offset à maintenir ici.
+        Quand centre_canvas est fourni, effectue un zoom centré sur le curseur
+        (le point sous la souris reste fixe). Réinitialise le pan au zoom minimum.
 
         Paramètres
         ----------
@@ -416,13 +442,30 @@ class CanvasWidget(QWidget):
             Nouveau facteur de zoom souhaité.
         centre_canvas : QPointF | None
             Point autour duquel centrer le zoom (coordonnées canvas).
-            Réservé pour une amélioration future — actuellement ignoré, le zoom
-            est toujours centré sur la zone plan.
-        # TODO : implémenter le zoom centré sur le curseur (centre_canvas) quand
-        # le pan sera disponible.
         """
-        zoom_clamp = max(ZOOM_MIN, min(ZOOM_MAX, nouveau_zoom))
-        self._zoom = zoom_clamp
+        nouveau_zoom = max(ZOOM_MIN, min(ZOOM_MAX, nouveau_zoom))
+
+        if centre_canvas is not None and not self._rect_affichage.isNull() and self._zoom > 0:
+            # Zoom centré sur le curseur : le point sous la souris reste fixe
+            old_tl = self._rect_affichage.topLeft()
+            ratio = nouveau_zoom / self._zoom
+            new_tl = centre_canvas - (centre_canvas - old_tl) * ratio
+            # Taille fit-to-view (zoom=1.0) dérivée de l'état courant
+            taille_fit_w = self._rect_affichage.width() / self._zoom
+            taille_fit_h = self._rect_affichage.height() / self._zoom
+            zone_cx = self._rect_zone_plan.center().x()
+            zone_cy = self._rect_zone_plan.center().y()
+            centered_tl_x = zone_cx - taille_fit_w * nouveau_zoom / 2
+            centered_tl_y = zone_cy - taille_fit_h * nouveau_zoom / 2
+            self._pan_offset = QPointF(
+                new_tl.x() - centered_tl_x,
+                new_tl.y() - centered_tl_y,
+            )
+
+        if nouveau_zoom <= ZOOM_MIN:
+            self._pan_offset = QPointF(0.0, 0.0)
+
+        self._zoom = nouveau_zoom
         self.zoom_change.emit(self._zoom)
         self.update()
 
@@ -437,21 +480,14 @@ class CanvasWidget(QWidget):
         --------
         dict avec les clés :
             - ``plan_chemin``  : chemin du fichier plan (str | None)
-            - ``plan_crop``    : tuple (x, y, w, h) ou None si pas de rognage
             - ``formes``       : liste des formes dessinées (copie)
             - ``bulles``       : liste des bulles call-out (copie)
             - ``zoom_factor``  : facteur de zoom courant (float)
             - ``offset``       : (0.0, 0.0) — l'offset est calculé automatiquement
         """
-        crop = None
-        if self._rect_rognage is not None:
-            r = self._rect_rognage
-            crop = (r.x(), r.y(), r.width(), r.height())
-
         zp = self._rect_affichage
         return {
             "plan_chemin": self._plan_chemin,
-            "plan_crop":   crop,
             "formes":      list(self._formes),
             "bulles":      list(self._bulles),
             "zoom_factor": self._zoom,
@@ -484,14 +520,6 @@ class CanvasWidget(QWidget):
         zoom = etat.get("zoom_factor", 1.0)
         self._zoom = max(ZOOM_MIN, min(ZOOM_MAX, zoom))
 
-        # Restaurer le rognage
-        crop = etat.get("plan_crop")
-        if crop is not None:
-            x, y, w, h = crop
-            self._rect_rognage = QRectF(x, y, w, h)
-        else:
-            self._rect_rognage = None
-
         # Charger le plan (ou vider le canvas si aucun chemin)
         chemin = etat.get("plan_chemin")
         if chemin:
@@ -501,19 +529,6 @@ class CanvasWidget(QWidget):
             self._plan_chemin = None
 
         self.update()
-
-    # ------------------------------------------------------------------
-    # Méthodes publiques de rognage
-    # ------------------------------------------------------------------
-
-    def reinitialiser_rognage(self) -> None:
-        """Supprime le rognage et affiche l'image entière."""
-        self._rect_rognage = None
-        self.update()
-
-    def obtenir_rect_rognage(self) -> QRectF | None:
-        """Retourne le rectangle de rognage en coordonnées image originale, ou None."""
-        return self._rect_rognage
 
     # ------------------------------------------------------------------
     # Conversion de coordonnées (système centralisé)
@@ -527,7 +542,7 @@ class CanvasWidget(QWidget):
         1. Soustraire le coin supérieur gauche de _rect_affichage
            (décalage dû au centrage du plan dans la zone canvas)
         2. Diviser par le facteur d'échelle effectif (_echelle)
-        3. Ajouter l'origine du rognage (_rect_rognage.topLeft() si défini)
+        3. Ajouter le coin supérieur gauche de _rect_affichage (centrage)
 
         Paramètres
         ----------
@@ -537,24 +552,19 @@ class CanvasWidget(QWidget):
         Retourne
         --------
         QPointF
-            Point dans l'espace de l'image originale (avant rognage).
+            Point dans l'espace de l'image originale.
         """
         # Étape 1 : retirer le décalage de centrage
         x_relatif = point_canvas.x() - self._rect_affichage.x()
         y_relatif = point_canvas.y() - self._rect_affichage.y()
 
-        # Étape 2 : passer en coordonnées image (avec rognage comme origine)
+        # Étape 2 : passer en coordonnées image
         if self._echelle != 0.0:
             x_img = x_relatif / self._echelle
             y_img = y_relatif / self._echelle
         else:
             x_img = x_relatif
             y_img = y_relatif
-
-        # Étape 3 : ajouter l'origine du rognage pour revenir en coordonnées image originale
-        if self._rect_rognage is not None and not self._rect_rognage.isEmpty():
-            x_img += self._rect_rognage.x()
-            y_img += self._rect_rognage.y()
 
         return QPointF(x_img, y_img)
 
@@ -565,14 +575,13 @@ class CanvasWidget(QWidget):
         Opération inverse de _canvas_vers_image.
 
         Étapes :
-        1. Soustraire l'origine du rognage
-        2. Multiplier par le facteur d'échelle effectif (_echelle)
-        3. Ajouter le coin supérieur gauche de _rect_affichage
+        1. Multiplier par le facteur d'échelle effectif (_echelle)
+        2. Ajouter le coin supérieur gauche de _rect_affichage
 
         Paramètres
         ----------
         point_image : QPointF
-            Point exprimé en coordonnées image originale (avant rognage).
+            Point exprimé en coordonnées image originale.
 
         Retourne
         --------
@@ -582,16 +591,11 @@ class CanvasWidget(QWidget):
         x_img = point_image.x()
         y_img = point_image.y()
 
-        # Étape 1 : retirer l'origine du rognage
-        if self._rect_rognage is not None and not self._rect_rognage.isEmpty():
-            x_img -= self._rect_rognage.x()
-            y_img -= self._rect_rognage.y()
-
-        # Étape 2 : passer en coordonnées canvas (image rognée × échelle)
+        # Étape 1 : passer en coordonnées canvas (image × échelle)
         x_canvas = x_img * self._echelle
         y_canvas = y_img * self._echelle
 
-        # Étape 3 : ajouter le décalage de centrage dans la zone canvas
+        # Étape 2 : ajouter le décalage de centrage dans la zone canvas
         x_canvas += self._rect_affichage.x()
         y_canvas += self._rect_affichage.y()
 
@@ -611,12 +615,8 @@ class CanvasWidget(QWidget):
         if self._pixmap is None:
             return 1.0
 
-        if self._rect_rognage is not None and not self._rect_rognage.isEmpty():
-            img_larg = float(self._rect_rognage.width())
-            img_haut = float(self._rect_rognage.height())
-        else:
-            img_larg = float(self._pixmap.width())
-            img_haut = float(self._pixmap.height())
+        img_larg = float(self._pixmap.width())
+        img_haut = float(self._pixmap.height())
         if img_larg <= 0 or img_haut <= 0:
             return 1.0
 
@@ -734,7 +734,10 @@ class CanvasWidget(QWidget):
     # ------------------------------------------------------------------
 
     def wheelEvent(self, event) -> None:  # noqa: N802
-        """Zoom centré sur la position du curseur à la molette."""
+        """Zoom à la molette uniquement avec Ctrl enfoncé (Ctrl+molette)."""
+        if not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            event.ignore()
+            return
         delta = event.angleDelta().y()
         if delta > 0:
             facteur = ZOOM_FACTEUR_MOLETTE
@@ -746,6 +749,14 @@ class CanvasWidget(QWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """Gère le clic souris selon le mode actif."""
         pos = event.pos()
+
+        # --- Défilement par bouton central (priorité absolue) ---
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_en_cours = True
+            self._pan_debut = event.pos()
+            self._pan_offset_debut = QPointF(self._pan_offset)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
 
         # Convertir la position canvas en coordonnées image originale (utile dans plusieurs modes)
         pt_image = self._canvas_vers_image(QPointF(pos))
@@ -828,6 +839,7 @@ class CanvasWidget(QWidget):
                         self._drag_multi_debut = pos
                     # Désélectionner la bulle si on clique sur une forme
                     self._bulle_selectionnee = None
+                self._emettre_epaisseur_selection()
             else:
                 if not ctrl_enfonce:
                     # Clic dans le vide sans Ctrl → désélectionner tout + démarrer lasso
@@ -862,6 +874,7 @@ class CanvasWidget(QWidget):
                     points=pts_captures,
                     couleur_rgb=self._couleur_active,
                     alpha=ALPHA_SEMI if self._semi_transparent else ALPHA_PLEIN,
+                    epaisseur=self._epaisseur_active,
                 )
                 self._formes.append(nouvelle_forme)
                 logger.debug("FormeLigne créée : %s", nouvelle_forme.id)
@@ -869,10 +882,6 @@ class CanvasWidget(QWidget):
         elif self._mode in (ModeCanvas.DESSIN_POLYGONE, ModeCanvas.LIGNES_CONNECTEES):
             # Accumulation des points en coordonnées image (la forme est créée au double-clic)
             self._points_en_cours.append(pt)
-
-        elif self._mode == ModeCanvas.ROGNAGE:
-            # Début du tracé du rectangle de rognage (point en coordonnées canvas)
-            self._rognage_en_cours = QPointF(float(pos.x()), float(pos.y()))
 
         elif self._mode == ModeCanvas.CALLOUT:
             # Mode call-out : deux clics successifs pour créer une bulle
@@ -913,6 +922,7 @@ class CanvasWidget(QWidget):
                 )
                 self._bulles.append(bulle)
                 self._ancrage_en_cours = None
+                self._echantillon_en_attente = None
                 self.bulle_creee.emit(bulle)
                 logger.debug(
                     "Bulle call-out créée : ancrage=%s, pos=%s, échantillon='%s'",
@@ -932,6 +942,16 @@ class CanvasWidget(QWidget):
         """
         # Mise à jour inconditionnelle de la position canvas (tracking actif)
         self._pos_souris = event.pos()
+
+        # --- Défilement par bouton central ---
+        if self._pan_en_cours and self._pan_debut is not None:
+            delta = event.pos() - self._pan_debut
+            self._pan_offset = QPointF(
+                self._pan_offset_debut.x() + delta.x(),
+                self._pan_offset_debut.y() + delta.y(),
+            )
+            self.update()
+            return
 
         if self._mode == ModeCanvas.SELECTION:
             # Drag de la poignée de pied d'une bulle (priorité absolue)
@@ -985,16 +1005,22 @@ class CanvasWidget(QWidget):
             elif self._lasso_debut is not None:
                 self._lasso_fin = QPointF(event.pos())
 
-        elif self._mode == ModeCanvas.ROGNAGE:
-            # En mode rognage, on met à jour uniquement _pos_souris
-            # (déjà fait ci-dessus) pour afficher le ghost du rectangle
-            pass
-
         # Toujours redessiner pour que le ghost suive le curseur
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         """Finalise le tracé ou le drag en cours."""
+        # --- Fin du défilement par bouton central ---
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_en_cours = False
+            self._pan_debut = None
+            # Restaurer le curseur selon le mode courant
+            if self._mode == ModeCanvas.SELECTION:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+            else:
+                self.setCursor(Qt.CursorShape.CrossCursor)
+            return
+
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
@@ -1022,6 +1048,7 @@ class CanvasWidget(QWidget):
                         points=[p0, p1],
                         couleur_rgb=self._couleur_active,
                         alpha=ALPHA_SEMI if self._semi_transparent else ALPHA_PLEIN,
+                        epaisseur=self._epaisseur_active,
                     )
                     self._formes.append(nouvelle_forme)
                     logger.debug("FormeRect créée : %s", nouvelle_forme.id)
@@ -1030,6 +1057,7 @@ class CanvasWidget(QWidget):
                         points=[p0, p1],
                         couleur_rgb=self._couleur_active,
                         alpha=ALPHA_SEMI if self._semi_transparent else ALPHA_PLEIN,
+                        epaisseur=self._epaisseur_active,
                     )
                     self._formes.append(nouvelle_forme)
                     logger.debug("FormeCercle créée : %s", nouvelle_forme.id)
@@ -1048,27 +1076,6 @@ class CanvasWidget(QWidget):
             # Fin du drag du pied de bulle
             self._drag_pied_bulle = None
 
-        elif self._mode == ModeCanvas.ROGNAGE and self._rognage_en_cours is not None:
-            fin_canvas = QPointF(float(pos.x()), float(pos.y()))
-            debut_canvas = self._rognage_en_cours
-            # Remise à zéro du point de départ avant tout traitement
-            self._rognage_en_cours = None
-            if debut_canvas != fin_canvas:
-                # Convertir les coins du rectangle en coordonnées image originale
-                debut_img = self._canvas_vers_image(debut_canvas)
-                fin_img   = self._canvas_vers_image(fin_canvas)
-                self._rect_rognage = QRectF(debut_img, fin_img).normalized()
-                # Clamp dans les limites du pixmap original
-                if self._pixmap is not None:
-                    pw = float(self._pixmap.width())
-                    ph = float(self._pixmap.height())
-                    self._rect_rognage = self._rect_rognage.intersected(
-                        QRectF(0.0, 0.0, pw, ph)
-                    )
-                    # Ignorer un rognage vide ou dégénéré
-                    if self._rect_rognage.isEmpty():
-                        self._rect_rognage = None
-
         self.update()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
@@ -1085,6 +1092,7 @@ class CanvasWidget(QWidget):
                 points=pts_captures,
                 couleur_rgb=self._couleur_active,
                 alpha=ALPHA_SEMI if self._semi_transparent else ALPHA_PLEIN,
+                epaisseur=self._epaisseur_active,
             )
             self._formes.append(nouvelle_forme)
             logger.debug("FormePolygone créée : %s", nouvelle_forme.id)
@@ -1101,6 +1109,7 @@ class CanvasWidget(QWidget):
                 points=pts_captures,
                 couleur_rgb=self._couleur_active,
                 alpha=ALPHA_SEMI if self._semi_transparent else ALPHA_PLEIN,
+                epaisseur=self._epaisseur_active,
             )
             self._formes.append(nouvelle_forme)
             logger.debug("FormeLignesConnectees créée : %s", nouvelle_forme.id)
@@ -1108,7 +1117,11 @@ class CanvasWidget(QWidget):
         self.update()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
-        """Supprime les formes et bulles sélectionnées sur appui de la touche Suppr."""
+        """Gère les touches clavier globales du canvas."""
+        if event.key() == Qt.Key.Key_Escape:
+            self.changer_mode("selection")
+            self.retour_selection.emit()
+            return
         if event.key() == Qt.Key.Key_Delete:
             modifie = False
             # Suppression des formes sélectionnées
@@ -1128,6 +1141,7 @@ class CanvasWidget(QWidget):
                 modifie = True
             if modifie:
                 self.update()
+                self.bulle_supprimee.emit()
             else:
                 super().keyPressEvent(event)
         else:
@@ -1274,6 +1288,7 @@ class CanvasWidget(QWidget):
             if bulle in self._bulles:
                 self._bulles.remove(bulle)
                 logger.debug("Bulle supprimée via menu contextuel : %s", bulle.id)
+                self.bulle_supprimee.emit()
             if self._bulle_selectionnee is bulle:
                 self._bulle_selectionnee = None
 
@@ -1288,7 +1303,7 @@ class CanvasWidget(QWidget):
         Orchestre le rendu dans l'ordre strict :
         1. Fond gris
         2. Plan (QPixmap) centré avec bordure noire, avec prise en compte
-           du zoom et du rognage éventuel
+           du zoom
         3. Formes colorées
         4. Bulles call-out
         5. Poignées de sélection
@@ -1320,33 +1335,23 @@ class CanvasWidget(QWidget):
                 # Mémoriser le cartouche pour les méthodes de conversion et le dessin de bordure
                 self._rect_zone_plan = zone_plan_qrectf
 
-                # --- Détermination de la source : image rognée ou entière ---
-                if self._rect_rognage is not None and not self._rect_rognage.isEmpty():
-                    src_rect = self._rect_rognage
-                else:
-                    src_rect = QRectF(self._pixmap.rect())
+                # --- Source : image entière ---
+                src_rect = QRectF(self._pixmap.rect())
 
                 taille_source = src_rect.size()  # QSizeF
 
-                # --- Calcul de la taille affichée avec zoom + KeepAspectRatio ---
-                # Taille souhaitée = source × zoom
-                taille_zoomee = QSizeF(
-                    taille_source.width() * self._zoom,
-                    taille_source.height() * self._zoom,
+                # --- Calcul de la taille affichée ---
+                # Étape 1 : taille fit-to-view (zoom=1.0) — image contrainte dans zone_plan
+                taille_fit = taille_source.scaled(
+                    zone_plan_qrectf.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
                 )
-
-                # Si la taille zoomée tient dans la zone plan, l'utiliser telle quelle
-                if (
-                    taille_zoomee.width() <= zone_plan_qrectf.width()
-                    and taille_zoomee.height() <= zone_plan_qrectf.height()
-                ):
-                    taille_affichee = taille_zoomee
-                else:
-                    # Sinon, contraindre dans la zone plan en conservant le ratio
-                    taille_affichee = taille_zoomee.scaled(
-                        zone_plan_qrectf.size(),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                    )
+                # Étape 2 : appliquer le zoom sur la taille fit
+                # À zoom=1.0 l'image remplit la zone plan ; à zoom>1.0 elle déborde (agrandissement)
+                taille_affichee = QSizeF(
+                    taille_fit.width() * self._zoom,
+                    taille_fit.height() * self._zoom,
+                )
 
                 # --- Facteur d'échelle effectif ---
                 # pixels_canvas / pixels_image (espace source rogné)
@@ -1355,9 +1360,9 @@ class CanvasWidget(QWidget):
                 else:
                     self._echelle = 1.0
 
-                # --- Centrage dans zone_plan ---
-                x_centre = zone_plan_qrectf.x() + (zone_plan_qrectf.width() - taille_affichee.width()) / 2
-                y_centre = zone_plan_qrectf.y() + (zone_plan_qrectf.height() - taille_affichee.height()) / 2
+                # --- Centrage dans zone_plan + offset de défilement ---
+                x_centre = zone_plan_qrectf.x() + (zone_plan_qrectf.width() - taille_affichee.width()) / 2 + self._pan_offset.x()
+                y_centre = zone_plan_qrectf.y() + (zone_plan_qrectf.height() - taille_affichee.height()) / 2 + self._pan_offset.y()
                 self._rect_affichage = QRectF(
                     x_centre, y_centre,
                     taille_affichee.width(), taille_affichee.height(),
@@ -1439,7 +1444,14 @@ class CanvasWidget(QWidget):
             couleur_contour = QColor(*forme.couleur_rgb)
             couleur_contour.setAlpha(255)
 
-            stylo = QPen(couleur_contour, EPAISSEUR_TRAIT)
+            # L'épaisseur est stockée en "pixels à zoom 100%".
+            # On la multiplie par le facteur de zoom pour qu'elle reste
+            # visuellement constante quelle que soit la mise à l'échelle.
+            epaisseur_canvas = forme.epaisseur * self._zoom
+            # Le contour adopte la même transparence que le remplissage :
+            # en mode semi-transparent le trait lui-même laisse voir le plan.
+            couleur_contour.setAlpha(forme.alpha)
+            stylo = QPen(couleur_contour, epaisseur_canvas)
             brosse = QBrush(couleur_remplissage)
 
             if isinstance(forme, FormeRect):
@@ -1679,24 +1691,8 @@ class CanvasWidget(QWidget):
           seul le segment vers le curseur est en ghost (40% opacité, tirets).
           Cela garantit la visibilité même si le tracking souris n'est pas encore
           déclenché.
-        - ROGNAGE : rectangle pointillé bleu, géré séparément.
         """
         pts_img = self._points_en_cours
-
-        # --- Cas spécial : ghost de rognage (trait pointillé bleu) ---
-        if self._mode == ModeCanvas.ROGNAGE and self._rognage_en_cours is not None:
-            if self._pos_souris is None:
-                return
-            stylo = QPen(QColor("blue"), EPAISSEUR_GHOST, Qt.PenStyle.DashLine)
-            peintre.setPen(stylo)
-            peintre.setBrush(Qt.BrushStyle.NoBrush)
-            # Les deux coins du ghost rognage sont déjà en coordonnées canvas
-            rect = QRectF(
-                self._rognage_en_cours,
-                QPointF(float(self._pos_souris.x()), float(self._pos_souris.y())),
-            ).normalized()
-            peintre.drawRect(rect)
-            return
 
         # --- DESSIN_RECT / DESSIN_CERCLE / DESSIN_LIGNE ---
         # Ces modes nécessitent impérativement un point de départ ET le curseur.
@@ -1711,7 +1707,7 @@ class CanvasWidget(QWidget):
             p0_canvas = self._image_vers_canvas(QPointF(*pts_img[0]))
 
             peintre.setOpacity(0.10)
-            peintre.setPen(QPen(couleur, EPAISSEUR_TRAIT))
+            peintre.setPen(QPen(couleur, self._epaisseur_active * self._zoom))
             peintre.setBrush(QBrush(couleur))
 
             if self._mode == ModeCanvas.DESSIN_RECT:
@@ -1744,7 +1740,7 @@ class CanvasWidget(QWidget):
 
             # --- Points validés et segments entre eux : toujours opaques ---
             peintre.setOpacity(1.0)
-            peintre.setPen(QPen(couleur, EPAISSEUR_TRAIT))
+            peintre.setPen(QPen(couleur, self._epaisseur_active * self._zoom))
             peintre.setBrush(QBrush(couleur))
 
             # Dessiner un disque de RAYON_POINT_GHOST px de rayon sur chaque point validé (canvas)

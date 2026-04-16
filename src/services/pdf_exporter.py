@@ -62,7 +62,8 @@ logger = logging.getLogger(__name__)
 def _annot_square(c: rl_canvas.Canvas,
                   x1: float, y1: float, x2: float, y2: float,
                   r_f: float, g_f: float, b_f: float,
-                  opacite: float) -> None:
+                  opacite: float,
+                  epaisseur_pt: float = 3.0) -> None:
     """
     Crée une annotation /Square via les objets reportlab natifs.
 
@@ -87,7 +88,7 @@ def _annot_square(c: rl_canvas.Canvas,
     d['C']       = rl_pdfdoc.PDFArray([r_f, g_f, b_f])   # couleur bordure
     d['IC']      = rl_pdfdoc.PDFArray([r_f, g_f, b_f])   # couleur remplissage
     d['CA']      = opacite
-    d['BS']      = rl_pdfdoc.PDFDictionary({'W': 1.5})
+    d['BS']      = rl_pdfdoc.PDFDictionary({'W': epaisseur_pt})
     d['F']       = 4  # Print flag
     c._addAnnotation(d)
 
@@ -95,7 +96,8 @@ def _annot_square(c: rl_canvas.Canvas,
 def _annot_circle(c: rl_canvas.Canvas,
                   cx: float, cy: float, rayon: float,
                   r_f: float, g_f: float, b_f: float,
-                  opacite: float) -> None:
+                  opacite: float,
+                  epaisseur_pt: float = 3.0) -> None:
     """
     Crée une annotation /Circle via les objets reportlab natifs.
 
@@ -115,7 +117,7 @@ def _annot_circle(c: rl_canvas.Canvas,
     d['C']       = rl_pdfdoc.PDFArray([r_f, g_f, b_f])
     d['IC']      = rl_pdfdoc.PDFArray([r_f, g_f, b_f])
     d['CA']      = opacite
-    d['BS']      = rl_pdfdoc.PDFDictionary({'W': 1.5})
+    d['BS']      = rl_pdfdoc.PDFDictionary({'W': epaisseur_pt})
     d['F']       = 4
     c._addAnnotation(d)
 
@@ -123,7 +125,8 @@ def _annot_circle(c: rl_canvas.Canvas,
 def _annot_polyline(c: rl_canvas.Canvas,
                     points_pdf: list[tuple[float, float]],
                     r_f: float, g_f: float, b_f: float,
-                    opacite: float) -> None:
+                    opacite: float,
+                    epaisseur_pt: float = 3.0) -> None:
     """
     Crée une annotation /PolyLine via les objets reportlab natifs.
 
@@ -155,7 +158,7 @@ def _annot_polyline(c: rl_canvas.Canvas,
     d['Vertices'] = rl_pdfdoc.PDFArray(sommets_plats)
     d['C']        = rl_pdfdoc.PDFArray([r_f, g_f, b_f])
     d['CA']       = opacite
-    d['BS']       = rl_pdfdoc.PDFDictionary({'W': 1.5})
+    d['BS']       = rl_pdfdoc.PDFDictionary({'W': epaisseur_pt})
     d['F']        = 4
     c._addAnnotation(d)
 
@@ -163,7 +166,8 @@ def _annot_polyline(c: rl_canvas.Canvas,
 def _annot_polygon(c: rl_canvas.Canvas,
                    points_pdf: list[tuple[float, float]],
                    r_f: float, g_f: float, b_f: float,
-                   opacite: float) -> None:
+                   opacite: float,
+                   epaisseur_pt: float = 3.0) -> None:
     """
     Annotation /Polygon via objets reportlab natifs (PDF 1.6+).
 
@@ -197,7 +201,7 @@ def _annot_polygon(c: rl_canvas.Canvas,
     d['C']        = rl_pdfdoc.PDFArray([r_f, g_f, b_f])
     d['IC']       = rl_pdfdoc.PDFArray([r_f, g_f, b_f])   # remplissage
     d['CA']       = opacite
-    d['BS']       = rl_pdfdoc.PDFDictionary({'W': 1.5})
+    d['BS']       = rl_pdfdoc.PDFDictionary({'W': epaisseur_pt})
     d['F']        = 4
     c._addAnnotation(d)
 
@@ -327,15 +331,10 @@ def _dessiner_planche(c: rl_canvas.Canvas, planche: Planche) -> None:
     Étapes :
     1. Cartouche (dessiné sur le flux de contenu)
     2. Chargement de l'image (avec gestion d'un plan au format PDF)
-    3. Application du crop défini par l'utilisateur
-    4. Résolution de la zone plan PDF :
-       - Si planche.zone_plan est défini : conversion via zone_plan_vers_pdf
-         (le canvas Qt est supposé avoir les mêmes dimensions que la page PDF,
-         ratio 1 point/pixel — approximation acceptable en l'absence de canvas_taille)
-       - Sinon : fallback sur la zone par défaut (toute la zone sous le cartouche)
-    5. Calcul de l'échelle et dessin du plan centré dans sa zone
-    6. Formes colorées → annotations PDF natives (_annoter_forme)
-    7. Bulles de légende → annotations PDF natives (_annoter_bulle)
+    3. Zone plan fixe définie par les constantes ZONE_PLAN_* de pdf_utils
+    4. Calcul de l'échelle et dessin du plan centré dans sa zone
+    5. Formes colorées → annotations PDF natives (_annoter_forme)
+    6. Bulles de légende → annotations PDF natives (_annoter_bulle)
     """
     # --- Cartouche ---
     _dessiner_cartouche(c, planche)
@@ -356,16 +355,6 @@ def _dessiner_planche(c: rl_canvas.Canvas, planche: Planche) -> None:
         img_pil = pages[0]
     else:
         img_pil = Image.open(chemin).convert("RGBA")
-
-    # --- Application du crop ---
-    if planche.plan_crop is not None:
-        x_crop, y_crop, larg_crop, haut_crop = planche.plan_crop
-        img_pil = img_pil.crop((
-            int(x_crop),
-            int(y_crop),
-            int(x_crop + larg_crop),
-            int(y_crop + haut_crop),
-        ))
 
     img_largeur, img_hauteur = img_pil.size
 
@@ -557,7 +546,7 @@ def _annoter_forme(c: rl_canvas.Canvas, forme: FormeBase,
             return
         x1, y1 = conv(*forme.points[0])
         x2, y2 = conv(*forme.points[1])
-        _annot_square(c, x1, y1, x2, y2, r_f, g_f, b_f, opacite)
+        _annot_square(c, x1, y1, x2, y2, r_f, g_f, b_f, opacite, forme.epaisseur)
 
     # --- Cercle ---
     elif isinstance(forme, FormeCercle):
@@ -568,7 +557,7 @@ def _annoter_forme(c: rl_canvas.Canvas, forme: FormeBase,
         bx, by = conv(*forme.points[1])
         # Le rayon est la distance euclidienne entre le centre et le point bord
         rayon = math.sqrt((bx - cx) ** 2 + (by - cy) ** 2)
-        _annot_circle(c, cx, cy, rayon, r_f, g_f, b_f, opacite)
+        _annot_circle(c, cx, cy, rayon, r_f, g_f, b_f, opacite, forme.epaisseur)
 
     # --- Ligne simple ---
     elif isinstance(forme, FormeLigne):
@@ -576,7 +565,7 @@ def _annoter_forme(c: rl_canvas.Canvas, forme: FormeBase,
             logger.debug("FormeLigne ignorée : moins de 2 points (id=%s).", forme.id)
             return
         pts = [conv(*pt) for pt in forme.points[:2]]
-        _annot_polyline(c, pts, r_f, g_f, b_f, opacite)
+        _annot_polyline(c, pts, r_f, g_f, b_f, opacite, forme.epaisseur)
 
     # --- Polygone fermé — annotation /Polygon native (PDF 1.6+) ---
     elif isinstance(forme, FormePolygone):
@@ -585,7 +574,7 @@ def _annoter_forme(c: rl_canvas.Canvas, forme: FormeBase,
             return
         # La fermeture est implicite dans /Polygon : on ne répète pas le premier point
         pts_pdf = [conv(*pt) for pt in forme.points]
-        _annot_polygon(c, pts_pdf, r_f, g_f, b_f, opacite)
+        _annot_polygon(c, pts_pdf, r_f, g_f, b_f, opacite, forme.epaisseur)
 
     # --- Lignes connectées ---
     elif isinstance(forme, FormeLignesConnectees):
@@ -595,7 +584,7 @@ def _annoter_forme(c: rl_canvas.Canvas, forme: FormeBase,
             )
             return
         pts = [conv(*pt) for pt in forme.points]
-        _annot_polyline(c, pts, r_f, g_f, b_f, opacite)
+        _annot_polyline(c, pts, r_f, g_f, b_f, opacite, forme.epaisseur)
 
     else:
         logger.debug("Type de forme inconnu ignoré : %s.", type(forme).__name__)

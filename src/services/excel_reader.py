@@ -35,6 +35,7 @@ import logging
 import openpyxl
 
 from src.models.echantillon import Echantillon
+from src.models.planche import Planche
 from src.services.couleur_resolver import resoudre_couleur
 from src.services.legende_builder import construire_texte
 
@@ -196,3 +197,48 @@ def charger_excel(chemin: str) -> list[Echantillon]:
         logger.warning("[DIAGNOSTIC] Liste d'échantillons VIDE après lecture de '%s'", chemin)
 
     return echantillons
+
+
+def maj_bulles_depuis_echantillons(
+    planches: list[Planche],
+    echantillons: list[Echantillon],
+) -> int:
+    """
+    Met à jour les bulles de légende de toutes les planches avec les nouvelles
+    données Excel, en faisant correspondre sur l'identifiant de prélèvement.
+
+    Pour chaque bulle dont l'échantillon existe dans la nouvelle liste,
+    les données (textes, couleur, mention…) sont remplacées par les valeurs
+    fraîches. La position et le point d'ancrage de la bulle sont conservés.
+
+    Si un prélèvement n'existe plus dans le nouvel Excel, la bulle est conservée
+    telle quelle et un avertissement est journalisé.
+
+    Paramètres
+    ----------
+    planches      : liste des planches du chantier (toutes, pas seulement l'active)
+    echantillons  : liste des échantillons issus du rechargement Excel
+
+    Retourne
+    --------
+    Nombre de bulles mises à jour.
+    """
+    index = {e.prelevement: e for e in echantillons}
+    nb = 0
+    for planche in planches:
+        for bulle in planche.bulles:
+            if bulle.echantillon is None:
+                continue
+            nouvel_ech = index.get(bulle.echantillon.prelevement)
+            if nouvel_ech is not None:
+                bulle.echantillon = nouvel_ech
+                bulle.couleur_rgb = nouvel_ech.couleur
+                nb += 1
+            else:
+                logger.warning(
+                    "Prélèvement '%s' introuvable dans le nouvel Excel "
+                    "— bulle de la planche '%s' conservée.",
+                    bulle.echantillon.prelevement,
+                    planche.reference_plan,
+                )
+    return nb

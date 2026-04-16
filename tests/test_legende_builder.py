@@ -197,6 +197,66 @@ class TestLigne2DescriptionJoint:
         assert ligne2 == "Joint/étanchéité de Mur"
 
 
+
+# ---------------------------------------------------------------------------
+# Ligne 2 : cas avancés de Joint (métallique, étanchéité)
+# ---------------------------------------------------------------------------
+
+class TestLigne2JointVariantes:
+    """Cas avancés : Joint métallique et Joint sur élément d étanchéité."""
+
+    def test_joint_metallique_produit_formule_fixe(self):
+        """F contient 'Joint' + 'métallique' → 'Joint de [E] Métallique'."""
+        _, ligne2, _ = _construire(
+            description="Joint métallique de dilatation",
+            element_sonde="Dalle",
+        )
+        assert ligne2 == "Joint de Dalle Métallique"
+
+    def test_joint_metallique_majuscules(self):
+        """'MÉTALLIQUE' en majuscules doit déclencher la règle métallique."""
+        _, ligne2, _ = _construire(
+            description="Joint MÉTALLIQUE",
+            element_sonde="Plancher",
+        )
+        assert ligne2 == "Joint de Plancher Métallique"
+
+    def test_joint_etancheite_avec_accent_utilise_apostrophe_d(self):
+        """E contient 'étanchéité' (avec accent) → [F] + " d'" + [E]."""
+        _, ligne2, _ = _construire(
+            description="Joint d'about",
+            element_sonde="étanchéité toiture",
+        )
+        assert ligne2 == "Joint d'about d'étanchéité toiture"
+
+    def test_joint_etancheite_sans_accent_utilise_apostrophe_d(self):
+        """E contient 'Etanchéité' (sans accent initial) → même résultat."""
+        _, ligne2, _ = _construire(
+            description="Joint souple",
+            element_sonde="Etanchéité façade",
+        )
+        assert ligne2 == "Joint souple d'Etanchéité façade"
+
+    def test_joint_etancheite_majuscules_utilise_apostrophe_d(self):
+        """E contient 'ÉTANCHÉITÉ' (tout majuscules) → même résultat."""
+        _, ligne2, _ = _construire(
+            description="Joint de rive",
+            element_sonde="ÉTANCHÉITÉ TOITURE",
+        )
+        assert ligne2 == "Joint de rive d'ÉTANCHÉITÉ TOITURE"
+
+    def test_joint_metallique_priorite_sur_etancheite(self):
+        """
+        Si F contient 'métallique' ET E contient 'étanchéité',
+        la règle 'métallique' est prioritaire (vérifiée en premier).
+        """
+        _, ligne2, _ = _construire(
+            description="Joint métallique",
+            element_sonde="étanchéité terrasse",
+        )
+        assert ligne2 == "Joint de étanchéité terrasse Métallique"
+
+
 # ---------------------------------------------------------------------------
 # Combinaisons complètes — cas issus de la documentation
 # ---------------------------------------------------------------------------

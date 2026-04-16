@@ -12,6 +12,7 @@ de haut niveau (ouverture de fichiers, export PDF, gestion multi-planches).
 """
 
 import logging
+import os
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QShortcut, QKeySequence
@@ -23,8 +24,9 @@ from PyQt6.QtWidgets import (
 )
 
 from src.models.planche import Planche
-from src.services.excel_reader import charger_excel
+from src.services.excel_reader import charger_excel, maj_bulles_depuis_echantillons
 from src.services.pdf_exporter import exporter_pdf
+from src.services.sauvegarde import charger, sauvegarder
 from src.ui.canvas_widget import CanvasWidget
 from src.ui.panneau_excel import PanneauExcel
 from src.ui.panneau_planches import PanneauPlanches
@@ -81,17 +83,22 @@ class MainWindow(QMainWindow):
         # Liste des planches ; la planche active est identifiée par son index
         self._planches: list[Planche] = []
         self._index_planche_active: int = -1
+        # Chemin du fichier de sauvegarde courant (None = jamais sauvegardé)
+        self._chemin_sauvegarde: str | None = None
 
         # --- Menus ---------------------------------------------------------
         self._creer_menus()
 
         # --- Connexions de signaux -----------------------------------------
         self._toolbar.mode_change.connect(self._canvas.changer_mode)
+        self._canvas.retour_selection.connect(self._toolbar.activer_selection)
         self._toolbar.transparence_change.connect(self._canvas.changer_transparence)
         self._toolbar.zoom_in.connect(self._canvas.zoom_in)
         self._toolbar.zoom_out.connect(self._canvas.zoom_out)
         self._toolbar.zoom_reset.connect(self._canvas.zoom_reset)
         self._toolbar.couleur_change.connect(self._canvas.changer_couleur_active)
+        self._toolbar.epaisseur_change.connect(self._canvas.definir_epaisseur)
+        self._canvas.epaisseur_selection_change.connect(self._toolbar.definir_valeur_affichee)
 
         self._panneau_excel.ouvrir_excel_demande.connect(self._ouvrir_excel)
         self._panneau_excel.echantillon_selectionne.connect(self._canvas.definir_echantillon_actif)
@@ -104,6 +111,7 @@ class MainWindow(QMainWindow):
         self._panneau_planches.planche_renommee.connect(self._renommer_planche)
 
         self._canvas.bulle_creee.connect(self._on_bulle_creee)
+        self._canvas.bulle_supprimee.connect(self._maj_echantillons_utilises)
 
         # --- Raccourcis presse-papier --------------------------------------
         QShortcut(QKeySequence.StandardKey.Copy,  self).activated.connect(self._canvas.copier)
@@ -124,19 +132,29 @@ class MainWindow(QMainWindow):
         # --- Menu Fichier --------------------------------------------------
         menu_fichier = barre.addMenu("Fichier")
 
+        action_ouvrir_chantier = menu_fichier.addAction("Ouvrir un chantier...")
+        action_ouvrir_chantier.setShortcut("Ctrl+O")
+        action_ouvrir_chantier.setStatusTip("Ouvrir un fichier de chantier (.json)")
+        action_ouvrir_chantier.triggered.connect(self._ouvrir_chantier)
+
+        action_enregistrer = menu_fichier.addAction("Enregistrer")
+        action_enregistrer.setShortcut("Ctrl+S")
+        action_enregistrer.setStatusTip("Enregistrer le chantier en cours")
+        action_enregistrer.triggered.connect(self._enregistrer_chantier)
+
+        action_enregistrer_sous = menu_fichier.addAction("Enregistrer sous...")
+        action_enregistrer_sous.setStatusTip("Enregistrer le chantier dans un nouveau fichier")
+        action_enregistrer_sous.triggered.connect(self._enregistrer_chantier_sous)
+
+        menu_fichier.addSeparator()
+
         action_ouvrir_excel = menu_fichier.addAction("Ouvrir Excel")
-        action_ouvrir_excel.setShortcut("Ctrl+O")
         action_ouvrir_excel.setStatusTip("Ouvrir un fichier Excel contenant les échantillons")
         action_ouvrir_excel.triggered.connect(self._ouvrir_excel)
 
         action_ouvrir_plan = menu_fichier.addAction("Ouvrir Plan")
         action_ouvrir_plan.setStatusTip("Ouvrir un plan image (JPG, PNG) ou PDF")
         action_ouvrir_plan.triggered.connect(self._ouvrir_plan)
-
-        action_reset_rognage = QAction("Réinitialiser le rognage", self)
-        action_reset_rognage.setStatusTip("Supprime le rognage et affiche le plan entier")
-        action_reset_rognage.triggered.connect(self._canvas.reinitialiser_rognage)
-        menu_fichier.addAction(action_reset_rognage)
 
         menu_fichier.addSeparator()
 
@@ -186,7 +204,6 @@ class MainWindow(QMainWindow):
         planche = self._planches[self._index_planche_active]
         etat = self._canvas.lire_etat()
         planche.plan_chemin  = etat["plan_chemin"]
-        planche.plan_crop    = etat["plan_crop"]
         planche.formes       = etat["formes"]
         planche.bulles       = etat["bulles"]
         planche.zoom_factor  = etat["zoom_factor"]
@@ -209,7 +226,6 @@ class MainWindow(QMainWindow):
         planche = self._planches[index]
         self._canvas.appliquer_etat({
             "plan_chemin": planche.plan_chemin,
-            "plan_crop":   planche.plan_crop,
             "formes":      planche.formes,
             "bulles":      planche.bulles,
             "zoom_factor": planche.zoom_factor,
@@ -217,6 +233,7 @@ class MainWindow(QMainWindow):
         })
         self._panneau_excel.definir_filtre_planche(planche.reference_plan)
         self._panneau_planches.selectionner(index)
+        self._maj_echantillons_utilises()
         logger.info("Planche %d chargée.", planche.numero)
 
     # ------------------------------------------------------------------
@@ -374,10 +391,22 @@ class MainWindow(QMainWindow):
         try:
             echantillons = charger_excel(chemin)
             self._panneau_excel.charger_echantillons(echantillons)
+
+            # Mettre à jour les bulles déjà placées avec les nouvelles données Excel
+            self._sauvegarder_etat_canvas()
+            nb_maj = maj_bulles_depuis_echantillons(self._planches, echantillons)
+            if nb_maj > 0:
+                # Recharger la planche active pour que le canvas reflète les changements
+                index_actif = self._index_planche_active
+                self._index_planche_active = -1
+                self._charger_planche(index_actif)
+
+            self._maj_echantillons_utilises()
             logger.info(
-                "Excel chargé : %d échantillon(s) depuis '%s'.",
+                "Excel chargé : %d échantillon(s) depuis '%s' ; %d bulle(s) mise(s) à jour.",
                 len(echantillons),
                 chemin,
+                nb_maj,
             )
             if not echantillons:
                 QMessageBox.warning(
@@ -468,3 +497,133 @@ class MainWindow(QMainWindow):
             bulle.echantillon.prelevement if bulle.echantillon else "—",
             bulle.id,
         )
+        self._maj_echantillons_utilises()
+
+    def _maj_echantillons_utilises(self) -> None:
+        """
+        Recalcule les prélèvements placés (toutes planches + planche active)
+        et met à jour le panneau Excel.
+        """
+        utilises: set = set()
+        planche_active: set = set()
+        bulles_actives = self._canvas.lire_etat().get("bulles", [])
+
+        for i, planche in enumerate(self._planches):
+            if i == self._index_planche_active:
+                for bulle in bulles_actives:
+                    if bulle.echantillon is not None:
+                        utilises.add(bulle.echantillon.prelevement)
+                        planche_active.add(bulle.echantillon.prelevement)
+            else:
+                for bulle in planche.bulles:
+                    if bulle.echantillon is not None:
+                        utilises.add(bulle.echantillon.prelevement)
+
+        self._panneau_excel.definir_prelev_utilises(utilises)
+        self._panneau_excel.definir_prelev_planche_active(planche_active)
+
+    # ------------------------------------------------------------------
+    # Slots — sauvegarde / chargement de chantier
+    # ------------------------------------------------------------------
+
+    def _enregistrer_chantier(self) -> None:
+        """
+        Enregistre le chantier. Demande un chemin si c'est la première fois
+        (Ctrl+S), puis sauvegarde directement dans le même fichier ensuite.
+        """
+        self._sauvegarder_etat_canvas()
+        if self._chemin_sauvegarde is None:
+            self._enregistrer_chantier_sous()
+        else:
+            try:
+                sauvegarder(self._planches, self._chemin_sauvegarde)
+                logger.info("Chantier enregistré : %s", self._chemin_sauvegarde)
+            except Exception as exc:
+                logger.error("Erreur sauvegarde : %s", exc)
+                QMessageBox.critical(
+                    self, "Erreur", f"Impossible d'enregistrer le chantier :\n{exc}"
+                )
+
+    def _enregistrer_chantier_sous(self) -> None:
+        """Enregistre le chantier dans un nouveau fichier choisi par l'utilisateur."""
+        chemin, _ = QFileDialog.getSaveFileName(
+            self,
+            "Enregistrer le chantier",
+            "",
+            "Chantier légendage (*.json)",
+        )
+        if not chemin:
+            return
+        try:
+            sauvegarder(self._planches, chemin)
+            self._chemin_sauvegarde = chemin
+            self.setWindowTitle(
+                f"Plan Légendage Amiante — {os.path.basename(chemin)}"
+            )
+            logger.info("Chantier enregistré sous : %s", chemin)
+        except Exception as exc:
+            logger.error("Erreur sauvegarde : %s", exc)
+            QMessageBox.critical(
+                self, "Erreur", f"Impossible d'enregistrer le chantier :\n{exc}"
+            )
+
+    def _ouvrir_chantier(self) -> None:
+        """Ouvre un fichier de chantier JSON et remplace l'état courant."""
+        chemin, _ = QFileDialog.getOpenFileName(
+            self,
+            "Ouvrir un chantier",
+            "",
+            "Chantier légendage (*.json)",
+        )
+        if not chemin:
+            return
+        try:
+            planches, manquants = charger(chemin)
+        except Exception as exc:
+            logger.error("Erreur chargement chantier : %s", exc)
+            QMessageBox.critical(
+                self, "Erreur", f"Impossible de lire le fichier :\n{exc}"
+            )
+            return
+
+        # Proposer la relocalisation pour chaque plan introuvable
+        for planche in planches:
+            if planche.plan_chemin in manquants:
+                self._proposer_relocalisation(planche)
+
+        self._planches = planches
+        self._chemin_sauvegarde = chemin
+        self._index_planche_active = -1
+        self._panneau_planches.rafraichir(self._planches)
+        self._charger_planche(0)
+        self.setWindowTitle(
+            f"Plan Légendage Amiante — {os.path.basename(chemin)}"
+        )
+        logger.info("Chantier ouvert : %s (%d planche(s))", chemin, len(planches))
+
+    def _proposer_relocalisation(self, planche: Planche) -> None:
+        """
+        Affiche une boîte de dialogue si le plan d'une planche est introuvable,
+        et permet à l'utilisateur de le localiser manuellement.
+
+        Paramètres
+        ----------
+        planche : Planche
+            La planche dont le plan_chemin n'existe plus sur disque.
+        """
+        rep = QMessageBox.question(
+            self,
+            "Fichier plan introuvable",
+            f"Le plan de « {planche} » est introuvable :\n{planche.plan_chemin}\n\n"
+            "Voulez-vous le localiser manuellement ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if rep == QMessageBox.StandardButton.Yes:
+            nouveau, _ = QFileDialog.getOpenFileName(
+                self,
+                "Localiser le plan",
+                "",
+                "Images et PDF (*.png *.jpg *.jpeg *.pdf)",
+            )
+            if nouveau:
+                planche.plan_chemin = nouveau

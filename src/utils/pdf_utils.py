@@ -87,7 +87,7 @@ def image_vers_pdf(px: float, py: float,
     ----------
     px, py             : coordonnées du point dans l'image source (pixels)
     img_largeur,
-    img_hauteur        : dimensions de l'image source après crop (pixels)
+    img_hauteur        : dimensions de l'image source (pixels)
     zone_x, zone_y     : coin bas-gauche de la zone plan dans le PDF (points ReportLab)
     zone_larg,
     zone_haut          : dimensions de la zone plan dans le PDF (points)

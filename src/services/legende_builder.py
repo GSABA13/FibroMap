@@ -9,15 +9,25 @@ Règles de construction :
   - ligne1 : identifiant du prélèvement                        (colonne G)
   - ligne2 : description du matériau                           (colonne F), SAUF :
       * si F vaut "/"      → utiliser le résultat d'analyse    (colonne I)
-      * si F contient "Joint" (insensible à la casse)
-                           → F + " de " + élément sondé        (colonne E)
+      * si F contient "Joint" ET F contient "métallique"
+                           → "Joint de " + [E] + " Métallique"
+      * si F contient "Joint" ET E contient "étanchéité"
+                           → [F] + " d'" + [E]
+      * si F contient "Joint" (cas général)
+                           → [F] + " de " + [E]
   - ligne3 : localisation dans le bâtiment                     (colonne D)
 """
 
 import logging
+import unicodedata
 
 # Journalisation du module
 logger = logging.getLogger(__name__)
+
+
+def _sans_accents(s: str) -> str:
+    """Retourne la chaîne en minuscules sans accents (pour comparaisons souples)."""
+    return unicodedata.normalize("NFD", s.lower()).encode("ascii", "ignore").decode("ascii")
 
 
 def construire_texte(
@@ -68,13 +78,32 @@ def construire_texte(
         ligne2 = resultat
 
     elif "joint" in description.strip().lower():
-        # Si la description contient "Joint", on concatène avec l'élément sondé
-        logger.debug(
-            "Prélèvement '%s' : description contient 'Joint' → ajout de l'élément sondé '%s'.",
-            prelevement,
-            element_sonde,
-        )
-        ligne2 = f"{description} de {element_sonde}"
+        desc_norm = _sans_accents(description.strip())
+        elem_norm = _sans_accents(element_sonde or "")
+
+        if "metallique" in desc_norm:
+            # Joint métallique : "Joint de [E] Métallique"
+            logger.debug(
+                "Prélèvement '%s' : Joint métallique → 'Joint de %s Métallique'.",
+                prelevement, element_sonde,
+            )
+            ligne2 = f"Joint de {element_sonde} Métallique"
+
+        elif "etancheite" in elem_norm:
+            # Joint sur élément d'étanchéité : [F] + " d'" + [E]
+            logger.debug(
+                "Prélèvement '%s' : Joint + étanchéité → '%s d'%s'.",
+                prelevement, description, element_sonde,
+            )
+            ligne2 = f"{description} d'{element_sonde}"
+
+        else:
+            # Cas général Joint : [F] + " de " + [E]
+            logger.debug(
+                "Prélèvement '%s' : Joint → '%s de %s'.",
+                prelevement, description, element_sonde,
+            )
+            ligne2 = f"{description} de {element_sonde}"
 
     else:
         # Cas standard : on affiche simplement la description

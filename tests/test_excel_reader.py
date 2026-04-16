@@ -10,8 +10,10 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from src.services.excel_reader import charger_excel
+from src.services.excel_reader import charger_excel, maj_bulles_depuis_echantillons
+from src.models.bulle import BulleLegende
 from src.models.echantillon import Echantillon
+from src.models.planche import Planche
 
 
 # ---------------------------------------------------------------------------
@@ -314,3 +316,121 @@ class TestFermetureClasseur:
         with patch("src.services.excel_reader.openpyxl.load_workbook", return_value=classeur_mock) as mock_load:
             charger_excel("mon_fichier.xlsx")
         mock_load.assert_called_once_with("mon_fichier.xlsx", read_only=True, data_only=True, keep_vba=True)
+
+
+# ---------------------------------------------------------------------------
+# Tests : maj_bulles_depuis_echantillons
+# ---------------------------------------------------------------------------
+
+def _ech(prelevement: str, resultat: str = "Absence amiante") -> Echantillon:
+    """Fabrique un Echantillon minimal pour les tests de mise à jour."""
+    from src.services.couleur_resolver import resoudre_couleur
+    couleur, mention = resoudre_couleur(resultat)
+    return Echantillon(
+        prelevement=prelevement,
+        description="Desc",
+        resultat=resultat,
+        localisation="Local",
+        element_sonde="Elem",
+        reference_plan="",
+        couleur=couleur,
+        mention=mention,
+        texte_ligne1=prelevement,
+        texte_ligne2="Desc",
+        texte_ligne3="Local",
+    )
+
+
+def _bulle_avec(prelevement: str, resultat: str = "Absence amiante") -> BulleLegende:
+    ech = _ech(prelevement, resultat)
+    return BulleLegende(
+        ancrage=(10.0, 10.0),
+        position=(50.0, 50.0),
+        echantillon=ech,
+        couleur_rgb=ech.couleur,
+    )
+
+
+class TestMajBullesDepuisEchantillons:
+    """Vérifie la mise à jour automatique des bulles lors du rechargement Excel."""
+
+    def test_bulle_existante_mise_a_jour(self):
+        """Une bulle dont le prélèvement existe dans la nouvelle liste est mise à jour."""
+        bulle = _bulle_avec("PRV-001", resultat="Absence amiante")
+        planche = Planche(numero=1, bulles=[bulle])
+
+        nouvel_ech = _ech("PRV-001", resultat="Présence amiante")
+        nb = maj_bulles_depuis_echantillons([planche], [nouvel_ech])
+
+        assert nb == 1
+        assert bulle.echantillon.resultat == "Présence amiante"
+
+    def test_couleur_bulle_mise_a_jour(self):
+        """La couleur_rgb de la bulle est synchronisée avec le nouvel échantillon."""
+        bulle = _bulle_avec("PRV-001", resultat="Absence amiante")
+        couleur_avant = bulle.couleur_rgb
+        planche = Planche(numero=1, bulles=[bulle])
+
+        nouvel_ech = _ech("PRV-001", resultat="Présence amiante")
+        maj_bulles_depuis_echantillons([planche], [nouvel_ech])
+
+        assert bulle.couleur_rgb != couleur_avant
+        assert bulle.couleur_rgb == nouvel_ech.couleur
+
+    def test_bulle_introuvable_conservee(self):
+        """Une bulle dont le prélèvement n'existe plus dans l'Excel est conservée."""
+        bulle = _bulle_avec("PRV-DISPARU")
+        planche = Planche(numero=1, bulles=[bulle])
+        resultat_avant = bulle.echantillon.resultat
+
+        nb = maj_bulles_depuis_echantillons([planche], [_ech("PRV-AUTRE")])
+
+        assert nb == 0
+        assert bulle.echantillon.resultat == resultat_avant
+
+    def test_bulle_sans_echantillon_ignoree(self):
+        """Une bulle sans échantillon lié n'est pas touchée."""
+        bulle = BulleLegende(ancrage=(0.0, 0.0), position=(0.0, 0.0), echantillon=None)
+        planche = Planche(numero=1, bulles=[bulle])
+
+        nb = maj_bulles_depuis_echantillons([planche], [_ech("PRV-001")])
+
+        assert nb == 0
+        assert bulle.echantillon is None
+
+    def test_plusieurs_planches_toutes_mises_a_jour(self):
+        """Les bulles de toutes les planches sont mises à jour, pas seulement la première."""
+        bulle1 = _bulle_avec("PRV-001")
+        bulle2 = _bulle_avec("PRV-002")
+        planches = [
+            Planche(numero=1, bulles=[bulle1]),
+            Planche(numero=2, bulles=[bulle2]),
+        ]
+        nouveaux = [
+            _ech("PRV-001", resultat="Présence amiante"),
+            _ech("PRV-002", resultat="Présence amiante"),
+        ]
+
+        nb = maj_bulles_depuis_echantillons(planches, nouveaux)
+
+        assert nb == 2
+        assert bulle1.echantillon.resultat == "Présence amiante"
+        assert bulle2.echantillon.resultat == "Présence amiante"
+
+    def test_position_ancrage_inchangee(self):
+        """La position et l'ancrage de la bulle ne sont pas modifiés."""
+        bulle = _bulle_avec("PRV-001")
+        bulle.ancrage = (123.0, 456.0)
+        bulle.position = (789.0, 321.0)
+        planche = Planche(numero=1, bulles=[bulle])
+
+        maj_bulles_depuis_echantillons([planche], [_ech("PRV-001", "Présence amiante")])
+
+        assert bulle.ancrage == (123.0, 456.0)
+        assert bulle.position == (789.0, 321.0)
+
+    def test_retourne_zero_si_aucune_bulle(self):
+        """Retourne 0 si les planches ne contiennent aucune bulle."""
+        planche = Planche(numero=1, bulles=[])
+        nb = maj_bulles_depuis_echantillons([planche], [_ech("PRV-001")])
+        assert nb == 0

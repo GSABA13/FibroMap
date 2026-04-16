@@ -776,3 +776,57 @@ class TestFormePolygoneContientPoint:
         ])
         # Point dans le creux haut-droit du L : (80, 20) est hors du polygone
         assert forme.contient_point(80.0, 20.0, tolerance=0.0) is False
+
+
+# ---------------------------------------------------------------------------
+# Champ epaisseur — FormeBase et sous-classes
+# ---------------------------------------------------------------------------
+
+class TestFormeBaseEpaisseur:
+    """FormeBase doit exposer un champ epaisseur initialisé à 2.0."""
+
+    def test_epaisseur_defaut_vaut_2(self):
+        assert FormeBase().epaisseur == 2.0
+
+    def test_epaisseur_est_float(self):
+        assert isinstance(FormeBase().epaisseur, float)
+
+    def test_epaisseur_modifiable(self):
+        forme = FormeBase()
+        forme.epaisseur = 5.0
+        assert forme.epaisseur == 5.0
+
+    def test_epaisseur_personnalisee_a_la_creation(self):
+        assert FormeBase(epaisseur=3.5).epaisseur == 3.5
+
+
+class TestSousClassesHeritentEpaisseur:
+    """Chaque sous-classe de FormeBase hérite du champ epaisseur."""
+
+    def test_forme_rect_epaisseur_defaut(self):
+        assert FormeRect().epaisseur == 2.0
+
+    def test_forme_cercle_epaisseur_defaut(self):
+        assert FormeCercle().epaisseur == 2.0
+
+    def test_forme_ligne_epaisseur_defaut(self):
+        assert FormeLigne().epaisseur == 2.0
+
+    def test_forme_polygone_epaisseur_defaut(self):
+        assert FormePolygone().epaisseur == 2.0
+
+    def test_forme_lignes_connectees_epaisseur_defaut(self):
+        assert FormeLignesConnectees().epaisseur == 2.0
+
+    def test_forme_rect_epaisseur_personnalisee(self):
+        assert FormeRect(epaisseur=7.0).epaisseur == 7.0
+
+    def test_forme_cercle_epaisseur_personnalisee(self):
+        assert FormeCercle(epaisseur=4.0).epaisseur == 4.0
+
+    def test_independance_instances_epaisseur(self):
+        """Modifier l'épaisseur d'une instance ne doit pas affecter les autres."""
+        f1 = FormeRect()
+        f2 = FormeRect()
+        f1.epaisseur = 10.0
+        assert f2.epaisseur == 2.0

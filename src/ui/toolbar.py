@@ -22,11 +22,12 @@ from PyQt6.QtGui import (
     QAction, QActionGroup, QBrush, QColor, QIcon, QPainter, QPen,
     QPixmap, QPolygon,
 )
-from PyQt6.QtWidgets import QToolBar
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolBar, QWidget
 
 from src.utils.constantes import (
     COULEUR_VERTE, COULEUR_ORANGE, COULEUR_ROUGE, TAILLE_ICONE_TOOLBAR,
     COULEUR_FOND_ICONE, COULEUR_FOND_ICONE_ACTIVE,
+    EPAISSEUR_MIN, EPAISSEUR_MAX, EPAISSEUR_DEFAUT,
 )
 
 # Journalisation propre au module
@@ -59,6 +60,35 @@ def _creer_icone(dessin_fn, taille: int = TAILLE_ICONE_TOOLBAR, actif: bool = Fa
         peintre.fillRect(0, 0, taille, taille, QColor(*couleur_fond))
         dessin_fn(peintre, taille)
     return QIcon(pixmap)
+
+
+def _dessiner_remplissage_plein(peintre: QPainter, t: int) -> None:
+    """Icône mode remplissage plein : carré coloré (vert) entièrement opaque."""
+    m = t // 5
+    couleur = QColor(*COULEUR_VERTE)
+    peintre.setPen(QPen(couleur.darker(130), 1.5))
+    peintre.setBrush(QBrush(couleur))
+    peintre.drawRect(m, m, t - 2 * m, t - 2 * m)
+
+
+def _dessiner_remplissage_semi(peintre: QPainter, t: int) -> None:
+    """Icône mode semi-transparent : moitié gauche pleine, moitié droite à 40% d'opacité."""
+    m = t // 5
+    moitie = (t - 2 * m) // 2
+    couleur_plein = QColor(*COULEUR_VERTE)
+    couleur_semi = QColor(*COULEUR_VERTE)
+    couleur_semi.setAlpha(100)
+    # Moitié gauche : pleine
+    peintre.setPen(Qt.PenStyle.NoPen)
+    peintre.setBrush(QBrush(couleur_plein))
+    peintre.drawRect(m, m, moitie, t - 2 * m)
+    # Moitié droite : semi-transparente
+    peintre.setBrush(QBrush(couleur_semi))
+    peintre.drawRect(m + moitie, m, t - 2 * m - moitie, t - 2 * m)
+    # Bordure commune
+    peintre.setPen(QPen(couleur_plein.darker(130), 1.5))
+    peintre.setBrush(Qt.BrushStyle.NoBrush)
+    peintre.drawRect(m, m, t - 2 * m, t - 2 * m)
 
 
 def _creer_icone_couleur(rgb: tuple, taille: int = TAILLE_ICONE_TOOLBAR) -> QIcon:
@@ -172,25 +202,6 @@ def _dessiner_callout(peintre: QPainter, t: int) -> None:
     peintre.drawPolygon(queue)
 
 
-def _dessiner_rognage(peintre: QPainter, t: int) -> None:
-    """Octogone à coins coupés évoquant le rognage du plan."""
-    m = t // 6
-    c = t // 5  # taille du coin coupé
-    pts = QPolygon([
-        QPoint(m + c,      m),
-        QPoint(t - m - c,  m),
-        QPoint(t - m,      m + c),
-        QPoint(t - m,      t - m - c),
-        QPoint(t - m - c,  t - m),
-        QPoint(m + c,      t - m),
-        QPoint(m,          t - m - c),
-        QPoint(m,          m + c),
-    ])
-    peintre.setPen(QPen(Qt.GlobalColor.black, 2))
-    peintre.setBrush(Qt.BrushStyle.NoBrush)
-    peintre.drawPolygon(pts)
-
-
 # Mapping valeur interne du mode → fonction de dessin de l'icône
 _ICONES_MODES: dict = {
     "selection":         _dessiner_selection,
@@ -200,7 +211,6 @@ _ICONES_MODES: dict = {
     "lignes_connectees": _dessiner_lignes_connectees,
     "polygone":          _dessiner_polygone,
     "callout":           _dessiner_callout,
-    "rognage":           _dessiner_rognage,
 }
 
 
@@ -217,7 +227,7 @@ class Toolbar(QToolBar):
     mode_change : pyqtSignal(str)
         Émis lorsque l'utilisateur change de mode de dessin.
         Valeurs possibles : "selection", "rect", "cercle", "ligne",
-        "lignes_connectees", "polygone", "callout", "rognage".
+        "lignes_connectees", "polygone", "callout".
     transparence_change : pyqtSignal(bool)
         Émis lorsque le bouton bascule Plein / Semi-transparent change d'état.
         True = semi-transparent, False = plein.
@@ -238,6 +248,7 @@ class Toolbar(QToolBar):
     zoom_in = pyqtSignal()
     zoom_out = pyqtSignal()
     zoom_reset = pyqtSignal()
+    epaisseur_change = pyqtSignal(int)  # Émet la nouvelle épaisseur de trait (px/pt)
 
     # Définition des modes : (libellé affiché, valeur interne, tooltip)
     _MODES: list[tuple[str, str, str]] = [
@@ -248,7 +259,6 @@ class Toolbar(QToolBar):
         ("Lignes connectées", "lignes_connectees", "Mode lignes connectées : tracer une polyligne"),
         ("Polygone",          "polygone",          "Mode polygone : dessiner un polygone fermé"),
         ("CallOut",           "callout",           "Mode CallOut : ajouter une bulle de légende"),
-        ("Rogner",            "rognage",           "Définir la zone de rognage du plan"),
     ]
 
     def __init__(self, parent=None) -> None:
@@ -284,13 +294,29 @@ class Toolbar(QToolBar):
         # Séparateur visuel entre les modes et les options
         self.addSeparator()
 
-        # Bouton bascule Plein / Semi-transparent
-        self._action_transparence = QAction("Semi-transparent", self)
-        self._action_transparence.setCheckable(True)
-        self._action_transparence.setToolTip(
-            "Basculer entre remplissage plein et semi-transparent"
+        # --- Groupe remplissage : Plein / Semi-transparent ---
+        self._groupe_remplissage = QActionGroup(self)
+        self._groupe_remplissage.setExclusive(True)
+
+        self._action_plein = QAction(
+            _creer_icone(_dessiner_remplissage_plein, actif=True), "", self
         )
-        self.addAction(self._action_transparence)
+        self._action_plein.setCheckable(True)
+        self._action_plein.setChecked(True)
+        self._action_plein.setToolTip("Remplissage plein (opaque)")
+        self._action_plein.setData(False)   # False = pas semi-transparent
+        self._groupe_remplissage.addAction(self._action_plein)
+        self.addAction(self._action_plein)
+
+        self._action_semi = QAction(
+            _creer_icone(_dessiner_remplissage_semi), "", self
+        )
+        self._action_semi.setCheckable(True)
+        self._action_semi.setChecked(False)
+        self._action_semi.setToolTip("Remplissage semi-transparent (50%)")
+        self._action_semi.setData(True)    # True = semi-transparent
+        self._groupe_remplissage.addAction(self._action_semi)
+        self.addAction(self._action_semi)
 
         # Séparateur visuel entre la transparence et le groupe couleur
         self.addSeparator()
@@ -337,15 +363,72 @@ class Toolbar(QToolBar):
         self.addAction(action_zoom_moins)
         self.addAction(action_zoom_reset)
 
+        # Séparateur visuel entre le zoom et l'épaisseur
+        self.addSeparator()
+
+        # --- Contrôle d'épaisseur de trait : [−] [valeur] [+] ---
+        self._epaisseur_courante: int = EPAISSEUR_DEFAUT
+
+        widget_ep = QWidget()
+        layout_ep = QHBoxLayout(widget_ep)
+        layout_ep.setContentsMargins(4, 0, 4, 0)
+        layout_ep.setSpacing(2)
+
+        layout_ep.addWidget(QLabel("Ép."))
+
+        self._btn_ep_moins = QPushButton("−")
+        self._btn_ep_moins.setFixedSize(22, 22)
+        self._btn_ep_moins.setToolTip("Diminuer l'épaisseur de 1")
+        layout_ep.addWidget(self._btn_ep_moins)
+
+        self._lbl_epaisseur = QLabel(str(self._epaisseur_courante))
+        self._lbl_epaisseur.setFixedWidth(24)
+        self._lbl_epaisseur.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_epaisseur.setToolTip("Épaisseur du trait / contour (px)")
+        layout_ep.addWidget(self._lbl_epaisseur)
+
+        self._btn_ep_plus = QPushButton("+")
+        self._btn_ep_plus.setFixedSize(22, 22)
+        self._btn_ep_plus.setToolTip("Augmenter l'épaisseur de 1")
+        layout_ep.addWidget(self._btn_ep_plus)
+
+        self.addWidget(widget_ep)
+
         # Connexion des signaux internes
         self._groupe_modes.triggered.connect(self._on_mode_triggered)
-        self._action_transparence.toggled.connect(self.transparence_change)
+        self._groupe_remplissage.triggered.connect(self._on_remplissage_triggered)
         action_zoom_plus.triggered.connect(self.zoom_in)
         action_zoom_moins.triggered.connect(self.zoom_out)
         action_zoom_reset.triggered.connect(self.zoom_reset)
+        self._btn_ep_moins.clicked.connect(self._on_ep_moins)
+        self._btn_ep_plus.clicked.connect(self._on_ep_plus)
 
         # Initialisation du fond des icônes : sélection active au démarrage
         self._rafraichir_icones_modes(mode_actif="selection")
+
+    # ------------------------------------------------------------------
+    # Slots publics
+    # ------------------------------------------------------------------
+
+    def activer_selection(self) -> None:
+        """Active le mode sélection (coche le bouton et met à jour les icônes)."""
+        self._actions_mode["selection"].trigger()
+
+    def definir_valeur_affichee(self, valeur: int) -> None:
+        """
+        Met à jour l'affichage du label d'épaisseur sans émettre epaisseur_change.
+
+        Utilisé par la fenêtre principale pour refléter l'épaisseur d'une forme
+        sélectionnée sur le canvas.
+
+        Paramètres
+        ----------
+        valeur : int
+            Valeur à afficher (clamped entre EPAISSEUR_MIN et EPAISSEUR_MAX).
+        """
+        valeur = max(EPAISSEUR_MIN, min(EPAISSEUR_MAX, valeur))
+        self._epaisseur_courante = valeur
+        self._lbl_epaisseur.setText(str(valeur))
 
     # ------------------------------------------------------------------
     # Slots privés
@@ -376,6 +459,35 @@ class Toolbar(QToolBar):
             if fn:
                 est_actif = (valeur == mode_actif)
                 action.setIcon(_creer_icone(fn, actif=est_actif))
+
+    def _on_remplissage_triggered(self, action: QAction) -> None:
+        """Émet transparence_change et rafraîchit les icônes plein/semi."""
+        semi = bool(action.data())
+        # Fond actif sur l'action sélectionnée, inactif sur l'autre
+        self._action_plein.setIcon(
+            _creer_icone(_dessiner_remplissage_plein, actif=not semi)
+        )
+        self._action_semi.setIcon(
+            _creer_icone(_dessiner_remplissage_semi, actif=semi)
+        )
+        self.transparence_change.emit(semi)
+        logger.debug("Remplissage : %s", "semi-transparent" if semi else "plein")
+
+    def _on_ep_moins(self) -> None:
+        """Diminue l'épaisseur de 1 et émet epaisseur_change."""
+        if self._epaisseur_courante > EPAISSEUR_MIN:
+            self._epaisseur_courante -= 1
+            self._lbl_epaisseur.setText(str(self._epaisseur_courante))
+            self.epaisseur_change.emit(self._epaisseur_courante)
+            logger.debug("Épaisseur : %d", self._epaisseur_courante)
+
+    def _on_ep_plus(self) -> None:
+        """Augmente l'épaisseur de 1 et émet epaisseur_change."""
+        if self._epaisseur_courante < EPAISSEUR_MAX:
+            self._epaisseur_courante += 1
+            self._lbl_epaisseur.setText(str(self._epaisseur_courante))
+            self.epaisseur_change.emit(self._epaisseur_courante)
+            logger.debug("Épaisseur : %d", self._epaisseur_courante)
 
     def _on_couleur_selectionnee(self) -> None:
         """Met à jour la couleur active et émet le signal couleur_change."""

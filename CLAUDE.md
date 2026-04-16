@@ -252,7 +252,7 @@ Les formes et bulles DOIVENT être des **annotations PDF natives** (pas dessiné
 ---
 
 ## Ce que Claude NE doit PAS faire
-- Ne jamais générer de sauvegarde de projet (pas de format .json ou autre) — l'export PDF est le seul output
+- Le format de sauvegarde de travail est `.json` (un fichier par chantier). L'export PDF reste l'output métier final.
 - Ne pas implémenter de détection automatique des zones sur le plan (tout est manuel)
 - Ne pas utiliser tkinter — uniquement PyQt6
 - Ne pas mélanger la logique métier dans les fichiers UI

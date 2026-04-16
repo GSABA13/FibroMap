@@ -2,13 +2,11 @@
 Modèle de données d'une planche de repérage amiante.
 
 Une planche correspond à une page du document PDF final.
-Elle regroupe un plan (image ou PDF), sa zone de rognage, les formes
-colorées dessinées dessus, les bulles de légende et l'état du canvas
-(zoom, décalage).
+Elle regroupe un plan (image ou PDF), les formes colorées dessinées dessus,
+les bulles de légende et l'état du canvas (zoom, décalage).
 
 Aucun import PyQt6 dans ce module.
-Le rognage et le décalage sont stockés sous forme de tuples pour rester
-indépendants de PyQt6. La conversion QRectF ↔ tuple se fait dans canvas_widget.py.
+Le décalage est stocké sous forme de tuple pour rester indépendant de PyQt6.
 """
 
 import uuid
@@ -27,8 +25,6 @@ class Planche:
     numero          : numéro affiché dans le cartouche PDF (ex: 1, 2, 3…)
     reference_plan  : libellé de référence (ex: "Planche de repérage 01")
     plan_chemin     : chemin absolu vers l'image ou le PDF du plan, ou None
-    plan_crop       : zone de rognage en coordonnées image sous forme de tuple
-                      (x, y, largeur, hauteur), ou None si aucun rognage
     formes          : liste des Forme* dessinées sur cette planche
     bulles          : liste des BulleLegende placées sur cette planche
     zoom_factor     : facteur de zoom du canvas au moment de la sauvegarde
@@ -44,8 +40,6 @@ class Planche:
     numero: int = 1
     reference_plan: str = ""
     plan_chemin: str | None = None
-    # Rognage : (x, y, largeur, hauteur) en coordonnées image, ou None
-    plan_crop: tuple | None = None
     formes: list[Any] = field(default_factory=list)   # list[FormeBase]
     bulles: list[Any] = field(default_factory=list)   # list[BulleLegende]
     zoom_factor: float = 1.0

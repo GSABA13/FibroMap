@@ -37,6 +37,7 @@ from src.utils.pdf_utils import (
     PAGE_LARGEUR, PAGE_HAUTEUR, MARGE,
     CARTOUCHE_LARGEUR, CARTOUCHE_HAUTEUR,
     ZONE_PLAN_X, ZONE_PLAN_Y, ZONE_PLAN_LARGEUR, ZONE_PLAN_HAUTEUR,
+    BULLE_MARGE,
 )
 
 
@@ -73,9 +74,12 @@ def _echantillon(
 
 
 def _image_pil_mock(largeur=800, hauteur=600):
-    """Retourne un mock PIL Image avec size et les méthodes requises."""
+    """Retourne un mock PIL Image avec size, width, height et mode corrects."""
     img = MagicMock()
     img.size = (largeur, hauteur)
+    img.width = largeur
+    img.height = hauteur
+    img.mode = "RGB"
     img.convert.return_value = img
     img.crop.return_value = img
     # save() n'écrit rien de réel (ImageReader sera mocké séparément)
@@ -89,24 +93,30 @@ def _image_pil_mock(largeur=800, hauteur=600):
 
 def _annotations_injectees(mock_c) -> list[str]:
     """
-    Retourne la liste des chaînes PDF brutes passées à c._addAnnotation().
+    Retourne la liste des chaînes PDF sérialisées passées à c._addAnnotation().
 
-    _addAnnotation reçoit un objet _AnnotationLitterale dont la méthode
-    .format(doc) retourne des bytes. On extrait directement les bytes
-    via l'attribut interne _contenu (latin-1).
+    Les annotations sont des PDFDictionary reportlab. On les sérialise en
+    passant un doc_mock minimal (encrypt=None) pour désactiver le chiffrement
+    et éviter les AttributeError dans PDFString.format().
     """
+    # doc_mock.encrypt.encode doit renvoyer les bytes tels quels (pas de chiffrement).
+    # PDFString.format() appelle document.encrypt.encode(s) inconditionnellement ;
+    # on ne peut pas mettre encrypt=None (AttributeError sur .encode).
+    doc_mock = MagicMock()
+    doc_mock.encrypt.encode = lambda s: s if isinstance(s, bytes) else s.encode("latin-1", "replace")
+
     resultat = []
     for appel in mock_c._addAnnotation.call_args_list:
-        obj = appel[0][0]  # premier argument positionnel
-        # _AnnotationLitterale stocke les bytes dans _contenu
+        obj = appel[0][0]
+        # Ancienne implémentation _AnnotationLitterale (bytes bruts)
         if hasattr(obj, "_contenu"):
             resultat.append(obj._contenu.decode("latin-1", errors="replace"))
         elif hasattr(obj, "format"):
-            # Fallback : appeler format(None) pour obtenir les bytes
-            try:
-                resultat.append(obj.format(None).decode("latin-1", errors="replace"))
-            except Exception:
-                pass
+            raw = obj.format(doc_mock)
+            if isinstance(raw, bytes):
+                resultat.append(raw.decode("latin-1", errors="replace"))
+            elif isinstance(raw, str):
+                resultat.append(raw)
     return resultat
 
 
@@ -119,6 +129,7 @@ def _appeler_annoter_forme(forme):
         mock_c, forme,
         img_larg=800, img_haut=600,
         zone_x=ZONE_PLAN_X, zone_y=ZONE_PLAN_Y,
+        zone_larg=ZONE_PLAN_LARGEUR, zone_haut=ZONE_PLAN_HAUTEUR,
         echelle=0.5,
     )
     return mock_c
@@ -133,6 +144,7 @@ def _appeler_annoter_bulle(bulle):
         mock_c, bulle,
         img_larg=800, img_haut=600,
         zone_x=ZONE_PLAN_X, zone_y=ZONE_PLAN_Y,
+        zone_larg=ZONE_PLAN_LARGEUR, zone_haut=ZONE_PLAN_HAUTEUR,
         echelle=0.5,
     )
     return mock_c
@@ -452,65 +464,6 @@ class TestExporterPdf:
         with pytest.raises(FileNotFoundError):
             exporter_pdf("/tmp/sortie_test.pdf", [planche])
 
-    @patch("src.services.pdf_exporter.ImageReader")
-    @patch("src.services.pdf_exporter.Image")
-    @patch("src.services.pdf_exporter.os.path.isfile", return_value=True)
-    @patch("src.services.pdf_exporter.rl_canvas.Canvas")
-    def test_planche_avec_crop_utilise_crop(
-        self, mock_canvas_cls, mock_isfile, mock_image_module, mock_image_reader
-    ):
-        """
-        Une planche avec plan_crop doit appeler img_pil.crop() avec les bonnes
-        coordonnées entières (x, y, x+larg, y+haut).
-        """
-        from src.services.pdf_exporter import exporter_pdf
-
-        mock_c = MagicMock()
-        mock_canvas_cls.return_value = mock_c
-        mock_image_reader.return_value = MagicMock()
-
-        img_mock = _image_pil_mock(800, 600)
-        img_croppee = _image_pil_mock(200, 150)
-        img_mock.crop.return_value = img_croppee
-        mock_image_module.open.return_value = img_mock
-
-        planche = Planche(
-            numero=1,
-            plan_chemin="/chemin/fictif/plan.png",
-            plan_crop=(10.5, 20.5, 200.0, 150.0),
-        )
-        exporter_pdf("/tmp/sortie_test.pdf", [planche])
-
-        # crop appelé avec (int(x), int(y), int(x+larg), int(y+haut))
-        img_mock.crop.assert_called_once_with((10, 20, 210, 170))
-
-    @patch("src.services.pdf_exporter.ImageReader")
-    @patch("src.services.pdf_exporter.Image")
-    @patch("src.services.pdf_exporter.os.path.isfile", return_value=True)
-    @patch("src.services.pdf_exporter.rl_canvas.Canvas")
-    def test_planche_sans_crop_n_appelle_pas_crop(
-        self, mock_canvas_cls, mock_isfile, mock_image_module, mock_image_reader
-    ):
-        """
-        Une planche sans plan_crop ne doit pas appeler img_pil.crop().
-        """
-        from src.services.pdf_exporter import exporter_pdf
-
-        mock_c = MagicMock()
-        mock_canvas_cls.return_value = mock_c
-        mock_image_reader.return_value = MagicMock()
-
-        img_mock = _image_pil_mock(800, 600)
-        mock_image_module.open.return_value = img_mock
-
-        planche = Planche(
-            numero=1,
-            plan_chemin="/chemin/fictif/plan.png",
-            plan_crop=None,
-        )
-        exporter_pdf("/tmp/sortie_test.pdf", [planche])
-
-        img_mock.crop.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -614,11 +567,13 @@ class TestDessinerCartouche:
 class TestConstantesPdfUtils:
     """Vérifie la cohérence des constantes de mise en page."""
 
-    def test_zone_plan_x_egal_marge(self):
-        assert ZONE_PLAN_X == pytest.approx(MARGE)
+    def test_zone_plan_x_inclut_marge_bulle(self):
+        """ZONE_PLAN_X = MARGE + BULLE_MARGE (espace pour les bulles latérales)."""
+        assert ZONE_PLAN_X == pytest.approx(MARGE + BULLE_MARGE, abs=0.01)
 
-    def test_zone_plan_y_egal_marge(self):
-        assert ZONE_PLAN_Y == pytest.approx(MARGE)
+    def test_zone_plan_y_inclut_demi_marge_bulle(self):
+        """ZONE_PLAN_Y = MARGE + BULLE_MARGE/2 (centrage vertical de la zone plan)."""
+        assert ZONE_PLAN_Y == pytest.approx(MARGE + BULLE_MARGE / 2, abs=0.01)
 
     def test_zone_plan_largeur_coherente(self):
         """La zone plan ne doit pas dépasser la largeur de page moins les marges."""
@@ -645,80 +600,6 @@ class TestConstantesPdfUtils:
         assert ZONE_PLAN_HAUTEUR > 0
 
 
-# ---------------------------------------------------------------------------
-# Tests : _annotation_litterale — infrastructure d'injection PDF
-# ---------------------------------------------------------------------------
-
-class TestAnnotationLitterale:
-    """
-    Vérifie que _AnnotationLitterale produit des bytes corrects via .format(doc).
-    """
-
-    def test_format_retourne_bytes(self):
-        """format(doc) doit retourner des bytes, peu importe la valeur de doc."""
-        from src.services.pdf_exporter import _AnnotationLitterale
-
-        obj = _AnnotationLitterale("<< /Type /Annot /Subtype /Square >>")
-        resultat = obj.format(None)
-        assert isinstance(resultat, bytes)
-
-    def test_format_contenu_correct(self):
-        """Les bytes retournés doivent correspondre au contenu encodé en latin-1."""
-        from src.services.pdf_exporter import _AnnotationLitterale
-
-        contenu = "<< /Type /Annot /Subtype /Circle >>"
-        obj = _AnnotationLitterale(contenu)
-        assert obj.format(None) == contenu.encode("latin-1")
-
-    def test_format_doc_ignoré(self):
-        """Le paramètre doc est ignoré : format(None) == format(MagicMock())."""
-        from src.services.pdf_exporter import _AnnotationLitterale
-
-        obj = _AnnotationLitterale("<< /Subtype /FreeText >>")
-        assert obj.format(None) == obj.format(MagicMock())
-
-
-# ---------------------------------------------------------------------------
-# Tests : _echapper_pdf — échappement des chaînes PDF
-# ---------------------------------------------------------------------------
-
-class TestEchapperPdf:
-    """Vérifie l'échappement correct des caractères spéciaux dans les chaînes PDF."""
-
-    def test_backslash_echappe(self):
-        """Un backslash simple doit être doublé."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("a\\b") == "a\\\\b"
-
-    def test_parenthese_ouvrante_echappee(self):
-        """Une parenthèse ouvrante doit être précédée d'un backslash."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("(texte") == "\\(texte"
-
-    def test_parenthese_fermante_echappee(self):
-        """Une parenthèse fermante doit être précédée d'un backslash."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("texte)") == "texte\\)"
-
-    def test_retour_chariot_echappe(self):
-        """Un \\r dans la chaîne doit être transformé en \\\\r."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("a\rb") == "a\\rb"
-
-    def test_saut_de_ligne_converti_en_retour_chariot(self):
-        """Un \\n doit être converti en \\\\r (standard PDF multi-ligne)."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("ligne1\nligne2") == "ligne1\\rligne2"
-
-    def test_texte_sans_caractere_special_inchange(self):
-        """Un texte sans caractères spéciaux est retourné tel quel."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("PRV-001 Enduit Couloir RDC") == "PRV-001 Enduit Couloir RDC"
-
-    def test_texte_vide_inchange(self):
-        """Une chaîne vide reste vide."""
-        from src.services.pdf_exporter import _echapper_pdf
-        assert _echapper_pdf("") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -731,10 +612,10 @@ class TestAnnoterBulle:
 
     Depuis le refactor, _annoter_bulle :
     - Retourne immédiatement sans rien injecter si bulle.echantillon is None.
-    - Injecte exactement 3 annotations si un échantillon est présent :
-        1. /PolyLine (call-out coudé)
-        2. /Circle  (pastille au point d'ancrage)
-        3. /FreeText (rectangle bulle + texte)
+    - Injecte exactement 1 annotation si un échantillon est présent :
+        /FreeText /IT FreeTextCallout avec /CL (call-out coudé) et /LE [/Circle]
+        (pastille au point d'ancrage). L'annotation est native PDF — Acrobat génère
+        l'apparence automatiquement.
     """
 
     def test_bulle_sans_echantillon_aucune_annotation(self):
@@ -752,10 +633,10 @@ class TestAnnoterBulle:
 
         mock_c._addAnnotation.assert_not_called()
 
-    def test_bulle_avec_echantillon_injecte_trois_annotations(self):
+    def test_bulle_avec_echantillon_injecte_une_annotation(self):
         """
-        Une bulle avec échantillon doit produire exactement 3 annotations :
-        /PolyLine (call-out) + /Circle (pastille) + /FreeText (bulle texte).
+        Une bulle avec échantillon doit produire exactement 1 annotation :
+        /FreeText /IT FreeTextCallout (call-out natif PDF avec /CL et /LE Circle).
         """
         ech = _echantillon(
             texte_ligne1="PRV-001",
@@ -771,8 +652,8 @@ class TestAnnoterBulle:
         )
         mock_c = _appeler_annoter_bulle(bulle)
 
-        assert mock_c._addAnnotation.call_count == 3, (
-            f"3 annotations attendues (PolyLine + Circle + FreeText), "
+        assert mock_c._addAnnotation.call_count == 1, (
+            f"1 annotation attendue (/FreeText FreeTextCallout), "
             f"reçu : {mock_c._addAnnotation.call_count}"
         )
 
@@ -792,8 +673,11 @@ class TestAnnoterBulle:
             f"Une annotation /FreeText attendue. Annotations reçues : {annotations}"
         )
 
-    def test_bulle_avec_echantillon_contient_polyline_callout(self):
-        """Les annotations produites doivent inclure un /PolyLine (call-out coudé)."""
+    def test_bulle_avec_echantillon_contient_callout_cl(self):
+        """
+        L'annotation /FreeText doit contenir /CL (géométrie du call-out natif PDF).
+        Le /IT FreeTextCallout intègre le call-out coudé dans la FreeText.
+        """
         ech = _echantillon()
         bulle = BulleLegende(
             ancrage=(100.0, 200.0),
@@ -804,12 +688,14 @@ class TestAnnoterBulle:
         mock_c = _appeler_annoter_bulle(bulle)
 
         annotations = _annotations_injectees(mock_c)
-        assert any("/PolyLine" in a for a in annotations), (
-            f"Une annotation /PolyLine attendue. Annotations reçues : {annotations}"
+        assert any("/CL" in a for a in annotations), (
+            f"/CL (call-out géométrie) attendu dans l'annotation. Reçues : {annotations}"
         )
 
-    def test_bulle_avec_echantillon_contient_circle_pastille(self):
-        """Les annotations produites doivent inclure un /Circle (pastille ancrage)."""
+    def test_bulle_avec_echantillon_contient_circle_le(self):
+        """
+        L'annotation /FreeText doit contenir /LE /Circle (pastille au point d'ancrage).
+        """
         ech = _echantillon()
         bulle = BulleLegende(
             ancrage=(100.0, 200.0),
@@ -821,7 +707,7 @@ class TestAnnoterBulle:
 
         annotations = _annotations_injectees(mock_c)
         assert any("/Circle" in a for a in annotations), (
-            f"Une annotation /Circle attendue. Annotations reçues : {annotations}"
+            f"/Circle (pastille LE) attendu dans l'annotation. Reçues : {annotations}"
         )
 
     def test_bulle_freetext_contient_texte_ligne1(self):
@@ -959,13 +845,13 @@ class TestAnnoterForme:
         )
 
     def test_forme_rect_annotation_possede_color(self):
-        """L'annotation /Square doit contenir un champ /Color."""
+        """L'annotation /Square doit contenir un champ /C (couleur, clé PDF)."""
         forme = FormeRect(points=[(100, 100), (300, 250)], couleur_rgb=COULEUR_VERTE)
         mock_c = _appeler_annoter_forme(forme)
 
         annotations = _annotations_injectees(mock_c)
-        assert "/Color" in annotations[0], (
-            f"/Color attendu dans l'annotation /Square : {annotations[0]!r}"
+        assert "/C " in annotations[0], (
+            f"/C attendu dans l'annotation /Square : {annotations[0]!r}"
         )
 
     def test_forme_rect_annotation_possede_flag_f4(self):
@@ -1044,8 +930,8 @@ class TestAnnoterForme:
         mock_c = _appeler_annoter_forme(forme)
         mock_c._addAnnotation.assert_not_called()
 
-    def test_forme_polygone_injecte_annotation_polyline(self):
-        """FormePolygone avec 3 points → annotation /PolyLine injectée (fermée)."""
+    def test_forme_polygone_injecte_annotation_polygon(self):
+        """FormePolygone avec 3 points → annotation /Polygon injectée (fermée implicitement)."""
         forme = FormePolygone(
             points=[(100, 100), (200, 50), (300, 150)],
             couleur_rgb=COULEUR_VERTE,
@@ -1054,16 +940,16 @@ class TestAnnoterForme:
 
         assert mock_c._addAnnotation.call_count == 1
         annotations = _annotations_injectees(mock_c)
-        assert "/PolyLine" in annotations[0], (
-            f"Annotation /PolyLine attendue pour FormePolygone : {annotations[0]!r}"
+        assert "/Polygon" in annotations[0], (
+            f"Annotation /Polygon attendue pour FormePolygone : {annotations[0]!r}"
         )
 
-    def test_forme_polygone_vertices_ferme_premier_point_repete(self):
+    def test_forme_polygone_vertices_trois_paires(self):
         """
-        L'annotation /PolyLine pour un polygone doit répéter le premier
-        sommet en dernier pour fermer la forme.
-        On utilise 3 points et on vérifie que les vertices contiennent 4 paires.
+        L'annotation /Polygon pour un polygone de 3 points ne répète pas
+        le premier sommet (fermeture implicite PDF) : 3 paires = 6 valeurs.
         """
+        import re
         forme = FormePolygone(
             points=[(0, 0), (100, 0), (50, 100)],
             couleur_rgb=COULEUR_VERTE,
@@ -1072,15 +958,12 @@ class TestAnnoterForme:
 
         annotations = _annotations_injectees(mock_c)
         assert annotations, "Aucune annotation produite"
-        # /Vertices [x1 y1 x2 y2 x3 y3 x4 y4] → 4 paires pour 3 points + fermeture
-        # On cherche /Vertices [ ... ] dans la chaîne
-        import re
         m = re.search(r"/Vertices \[([^\]]+)\]", annotations[0])
         assert m, f"/Vertices introuvable dans {annotations[0]!r}"
         valeurs = m.group(1).strip().split()
-        # 4 paires de coordonnées = 8 valeurs
-        assert len(valeurs) == 8, (
-            f"8 valeurs attendues dans /Vertices (4 paires), reçu {len(valeurs)} : {valeurs}"
+        # 3 paires = 6 valeurs (pas de fermeture explicite en /Polygon)
+        assert len(valeurs) == 6, (
+            f"6 valeurs attendues dans /Vertices (3 paires), reçu {len(valeurs)} : {valeurs}"
         )
 
     def test_forme_lignes_connectees_injecte_annotation_polyline(self):
@@ -1108,9 +991,8 @@ class TestAnnoterForme:
 
     def test_forme_couleur_orange_dans_annotation(self):
         """
-        La couleur orange (255, 128, 0) doit être correctement normalisée
-        et présente dans la chaîne /Color de l'annotation.
-        255/255 = 1.0000, 128/255 ≈ 0.5020, 0/255 = 0.0000.
+        La couleur orange (255, 128, 0) doit être correctement normalisée.
+        Reportlab sérialise 255/255=1 et 128/255≈.501961 sans zéros de rembourrage.
         """
         forme = FormeRect(
             points=[(0, 0), (100, 100)],
@@ -1120,12 +1002,12 @@ class TestAnnoterForme:
 
         annotations = _annotations_injectees(mock_c)
         assert annotations, "Aucune annotation produite"
-        # Valeurs attendues : 1.0000, 0.5020, 0.0000
-        assert "1.0000" in annotations[0], (
-            f"Composante rouge normalisée (1.0000) attendue : {annotations[0]!r}"
+        # Reportlab sérialise 1 (pas 1.0000) et .501961 (pas 0.5020)
+        assert " 1 " in annotations[0] or annotations[0].startswith("1 "), (
+            f"Composante rouge normalisée (1) attendue : {annotations[0]!r}"
         )
-        assert "0.5020" in annotations[0], (
-            f"Composante verte normalisée (~0.5020) attendue : {annotations[0]!r}"
+        assert ".501961" in annotations[0] or "0.501961" in annotations[0], (
+            f"Composante verte normalisée (~.501961) attendue : {annotations[0]!r}"
         )
 
     def test_forme_pleine_opacite_1(self):
@@ -1141,8 +1023,8 @@ class TestAnnoterForme:
 
         annotations = _annotations_injectees(mock_c)
         assert annotations, "Aucune annotation produite"
-        assert "/CA 1.00" in annotations[0], (
-            f"/CA 1.00 attendu pour une forme pleine : {annotations[0]!r}"
+        assert "/CA 1" in annotations[0], (
+            f"/CA 1 attendu pour une forme pleine : {annotations[0]!r}"
         )
 
     def test_forme_semi_transparente_opacite_0_5(self):
@@ -1159,8 +1041,8 @@ class TestAnnoterForme:
 
         annotations = _annotations_injectees(mock_c)
         assert annotations, "Aucune annotation produite"
-        assert "/CA 0.50" in annotations[0], (
-            f"/CA 0.50 attendu pour une forme semi-transparente : {annotations[0]!r}"
+        assert "/CA .5" in annotations[0], (
+            f"/CA .5 attendu pour une forme semi-transparente : {annotations[0]!r}"
         )
 
     def test_annotation_square_possede_bs(self):

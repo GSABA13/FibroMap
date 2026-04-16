@@ -60,6 +60,12 @@ class PanneauExcel(QWidget):
         self._filtre_actif: bool = False
         # Échantillon actuellement sélectionné (None si aucun)
         self._echantillon_actif = None
+        # Ensemble des identifiants (prelevement) déjà placés sur une planche (toutes)
+        self._prelev_utilises: set = set()
+        # Ensemble des identifiants placés uniquement sur la planche active
+        self._prelev_planche_active: set = set()
+        # True = afficher uniquement les échantillons placés sur la planche active
+        self._filtre_places_actif: bool = False
 
         # --- Mise en page verticale -----------------------------------------
         layout = QVBoxLayout(self)
@@ -75,17 +81,32 @@ class PanneauExcel(QWidget):
         self._btn_ouvrir.setToolTip("Ouvrir un fichier Excel contenant les échantillons")
         layout_haut.addWidget(self._btn_ouvrir)
 
-        # Bouton toggle : afficher tous les échantillons ou filtrer par planche
+        # Bouton toggle : afficher tous les échantillons ou filtrer par référence plan
         self._btn_filtre = QPushButton("Tous")
         self._btn_filtre.setCheckable(True)
         self._btn_filtre.setChecked(False)
         self._btn_filtre.setToolTip(
             "Tous : afficher tous les échantillons\n"
-            "Planche : n'afficher que les échantillons de la planche active"
+            "Planche : n'afficher que les échantillons liés à la référence plan active"
         )
         layout_haut.addWidget(self._btn_filtre)
 
         layout.addLayout(layout_haut)
+
+        # --- Ligne secondaire : filtre "Placés sur cette planche" -------------
+        layout_filtre2 = QHBoxLayout()
+        layout_filtre2.setSpacing(MARGE_PANNEAU)
+
+        self._btn_places = QPushButton("Voir placés")
+        self._btn_places.setCheckable(True)
+        self._btn_places.setChecked(False)
+        self._btn_places.setToolTip(
+            "Afficher uniquement les échantillons déjà placés sur la planche active"
+        )
+        layout_filtre2.addWidget(self._btn_places)
+        layout_filtre2.addStretch()
+
+        layout.addLayout(layout_filtre2)
 
         # --- Liste scrollable des échantillons ------------------------------
         self._liste = QListWidget()
@@ -96,6 +117,7 @@ class PanneauExcel(QWidget):
         # --- Connexions de signaux ------------------------------------------
         self._btn_ouvrir.clicked.connect(self.ouvrir_excel_demande)
         self._btn_filtre.toggled.connect(self._on_filtre_bascule)
+        self._btn_places.toggled.connect(self._on_filtre_places_bascule)
         self._liste.itemClicked.connect(self._on_item_clique)
 
     # ------------------------------------------------------------------
@@ -115,6 +137,35 @@ class PanneauExcel(QWidget):
         self._tous_echantillons = echantillons
         self._rafraichir_liste()
         logger.info("%d échantillon(s) reçus dans le panneau Excel.", len(echantillons))
+
+    def definir_prelev_utilises(self, prelev_utilises: set) -> None:
+        """
+        Met à jour l'ensemble des prélèvements déjà placés sur une planche.
+
+        Les items correspondants sont grisés et rendus non-sélectionnables.
+
+        Paramètres
+        ----------
+        prelev_utilises : set
+            Ensemble des identifiants (prelevement) déjà associés à une bulle.
+        """
+        self._prelev_utilises = prelev_utilises
+        self._rafraichir_liste()
+
+    def definir_prelev_planche_active(self, prelev_planche_active: set) -> None:
+        """
+        Met à jour l'ensemble des prélèvements placés sur la planche active.
+
+        Rafraîchit la liste si le filtre "Placés" est actif.
+
+        Paramètres
+        ----------
+        prelev_planche_active : set
+            Ensemble des identifiants (prelevement) placés sur la planche active.
+        """
+        self._prelev_planche_active = prelev_planche_active
+        if self._filtre_places_actif:
+            self._rafraichir_liste()
 
     def definir_filtre_planche(self, reference_plan: str) -> None:
         """
@@ -142,17 +193,21 @@ class PanneauExcel(QWidget):
 
     def _echantillons_filtres(self) -> list:
         """
-        Retourne les échantillons à afficher selon le filtre.
+        Retourne les échantillons à afficher selon le filtre actif.
 
-        Si le filtre n'est pas actif ou si la référence plan est vide,
-        tous les échantillons sont retournés.
+        Priorité : filtre "Placés" > filtre "Planche" > aucun filtre.
         """
-        if not self._filtre_actif or not self._filtre_planche:
-            return self._tous_echantillons
-        return [
-            e for e in self._tous_echantillons
-            if e.reference_plan == self._filtre_planche
-        ]
+        if self._filtre_places_actif:
+            return [
+                e for e in self._tous_echantillons
+                if e.prelevement in self._prelev_planche_active
+            ]
+        if self._filtre_actif and self._filtre_planche:
+            return [
+                e for e in self._tous_echantillons
+                if e.reference_plan == self._filtre_planche
+            ]
+        return self._tous_echantillons
 
     def _ajouter_ligne(self, ech) -> None:
         """
@@ -201,8 +256,27 @@ class PanneauExcel(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, ech)
         item.setSizeHint(widget_ligne.sizeHint())
 
+        # Griser et désactiver les échantillons déjà placés sur une planche
+        if ech.prelevement in self._prelev_utilises:
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            label_texte.setStyleSheet("color: #999999; text-decoration: line-through;")
+            pastille.setStyleSheet(
+                "background-color: #cccccc; "
+                "border-radius: 6px; "
+                "border: 1px solid rgba(0,0,0,0.15);"
+            )
+
         self._liste.addItem(item)
         self._liste.setItemWidget(item, widget_ligne)
+
+    def _on_filtre_places_bascule(self, coche: bool) -> None:
+        """Active/désactive le filtre 'Placés sur la planche active'."""
+        self._filtre_places_actif = coche
+        self._btn_places.setText("Placés ✓" if coche else "Voir placés")
+        if coche and self._filtre_actif:
+            # Désactiver l'autre filtre (exclusivité)
+            self._btn_filtre.setChecked(False)
+        self._rafraichir_liste()
 
     def _on_filtre_bascule(self, coche: bool) -> None:
         """
@@ -218,6 +292,9 @@ class PanneauExcel(QWidget):
         """
         self._filtre_actif = coche
         self._btn_filtre.setText("Planche" if coche else "Tous")
+        if coche and self._filtre_places_actif:
+            # Désactiver l'autre filtre (exclusivité)
+            self._btn_places.setChecked(False)
         self._rafraichir_liste()
 
     @property
@@ -241,6 +318,8 @@ class PanneauExcel(QWidget):
         item : QListWidgetItem
             L'item cliqué dans la liste.
         """
+        if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            return
         ech = item.data(Qt.ItemDataRole.UserRole)
         if ech is not None:
             self._echantillon_actif = ech

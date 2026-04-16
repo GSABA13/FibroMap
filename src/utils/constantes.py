@@ -66,11 +66,16 @@ TAILLE_POIGNEE: int = 6    # px
 # ---------------------------------------------------------------------------
 
 # Épaisseur par défaut des contours dessinés sur le canvas
-EPAISSEUR_TRAIT: float = 1.5   # px
+EPAISSEUR_TRAIT: float = 2.0   # px  (valeur par défaut des nouvelles formes)
 
 # Épaisseurs de trait secondaires
 EPAISSEUR_POIGNEE: float = 1.0    # Contour des poignées de sélection (px)
 EPAISSEUR_GHOST: float = 1.0      # Contour du tracé fantôme en cours (px)
+
+# Bornes du contrôle d'épaisseur dans la toolbar
+EPAISSEUR_MIN: int = 1             # Épaisseur minimale (px/pt)
+EPAISSEUR_MAX: int = 20            # Épaisseur maximale (px/pt)
+EPAISSEUR_DEFAUT: int = 2          # Valeur initiale du spinner
 
 # ---------------------------------------------------------------------------
 # Tolérance de sélection
@@ -104,7 +109,7 @@ ALPHA_LASSO: int = 30                                   # Transparence du fond l
 RAYON_POINT_GHOST: float = 4.0    # Rayon des disques marquant les points validés (px)
 
 # Zoom
-ZOOM_MIN: float = 0.10             # Facteur de zoom minimal (10%)
+ZOOM_MIN: float = 1.0              # Facteur de zoom minimal (100% — pas de dézoom sous la vue complète)
 ZOOM_MAX: float = 5.00             # Facteur de zoom maximal (500%)
 ZOOM_FACTEUR_MOLETTE: float = 1.15 # Facteur appliqué par cran de molette
 ZOOM_DEFAUT: float = 1.0           # Facteur de zoom par défaut (100%)
