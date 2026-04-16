@@ -512,12 +512,13 @@ class MainWindow(QMainWindow):
             if i == self._index_planche_active:
                 for bulle in bulles_actives:
                     if bulle.echantillon is not None:
-                        utilises.add(bulle.echantillon.prelevement)
-                        planche_active.add(bulle.echantillon.prelevement)
+                        cle = (bulle.echantillon.prelevement, bulle.echantillon.localisation)
+                        utilises.add(cle)
+                        planche_active.add(cle)
             else:
                 for bulle in planche.bulles:
                     if bulle.echantillon is not None:
-                        utilises.add(bulle.echantillon.prelevement)
+                        utilises.add((bulle.echantillon.prelevement, bulle.echantillon.localisation))
 
         self._panneau_excel.definir_prelev_utilises(utilises)
         self._panneau_excel.definir_prelev_planche_active(planche_active)

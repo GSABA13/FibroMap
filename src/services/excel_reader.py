@@ -223,13 +223,14 @@ def maj_bulles_depuis_echantillons(
     --------
     Nombre de bulles mises à jour.
     """
-    index = {e.prelevement: e for e in echantillons}
+    index = {(e.prelevement, e.localisation): e for e in echantillons}
     nb = 0
     for planche in planches:
         for bulle in planche.bulles:
             if bulle.echantillon is None:
                 continue
-            nouvel_ech = index.get(bulle.echantillon.prelevement)
+            cle = (bulle.echantillon.prelevement, bulle.echantillon.localisation)
+            nouvel_ech = index.get(cle)
             if nouvel_ech is not None:
                 bulle.echantillon = nouvel_ech
                 bulle.couleur_rgb = nouvel_ech.couleur
