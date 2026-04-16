@@ -68,7 +68,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,           # Remplace None par 'fibromap.ico' si tu as une icône
+    icon='fibromap.ico',
 )
 
 coll = COLLECT(
