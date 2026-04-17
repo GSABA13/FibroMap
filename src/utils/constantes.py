@@ -110,7 +110,7 @@ RAYON_POINT_GHOST: float = 4.0    # Rayon des disques marquant les points valid�
 
 # Zoom
 ZOOM_MIN: float = 1.0              # Facteur de zoom minimal (100% — pas de dézoom sous la vue complète)
-ZOOM_MAX: float = 5.00             # Facteur de zoom maximal (500%)
+ZOOM_MAX: float = 7.00             # Facteur de zoom maximal (700%)
 ZOOM_FACTEUR_MOLETTE: float = 1.15 # Facteur appliqué par cran de molette
 ZOOM_DEFAUT: float = 1.0           # Facteur de zoom par défaut (100%)
 

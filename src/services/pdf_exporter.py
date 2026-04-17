@@ -267,6 +267,7 @@ def _annot_freetext_callout(c: rl_canvas.Canvas,
     ft['DS']       = rl_pdfdoc.PDFString(ds_str)
     ft['Q']        = 1    # 0=gauche, 1=centré, 2=droite
     ft['C']        = rl_pdfdoc.PDFArray([])   # couleur vide → fond transparent dans Acrobat
+    ft['BS']       = rl_pdfdoc.PDFDictionary({'W': 2.0})  # épaisseur trait call-out
     ft['F']        = 4
     ft['LE']       = rl_pdfdoc.PDFArray([rl_pdfdoc.PDFName('Circle'),
                                           rl_pdfdoc.PDFName('None')])

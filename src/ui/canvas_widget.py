@@ -1375,12 +1375,21 @@ class CanvasWidget(QWidget):
                     src_rect.toRect(),
                 )
 
-                # Border fixe de la zone plan — identique au cartouche du PDF
-                zone_rect = self._rect_zone_plan_canvas()
-                if not zone_rect.isNull():
-                    peintre.setPen(QPen(QColor("black"), 1.5))
-                    peintre.setBrush(Qt.BrushStyle.NoBrush)
-                    peintre.drawRect(zone_rect)
+                # Cadre de la zone plan — même position qu'à zoom=1.0, agrandi par le zoom
+                # et décalé par le pan, comme n'importe quel objet de la scène
+                zone_cx = zone_plan_qrectf.center().x()
+                zone_cy = zone_plan_qrectf.center().y()
+                zone_w  = zone_plan_qrectf.width()  * self._zoom
+                zone_h  = zone_plan_qrectf.height() * self._zoom
+                rect_cadre_zoome = QRectF(
+                    zone_cx - zone_w / 2 + self._pan_offset.x(),
+                    zone_cy - zone_h / 2 + self._pan_offset.y(),
+                    zone_w,
+                    zone_h,
+                )
+                peintre.setPen(QPen(QColor("black"), 1.5))
+                peintre.setBrush(Qt.BrushStyle.NoBrush)
+                peintre.drawRect(rect_cadre_zoome)
 
             else:
                 # Aucun plan chargé : message d'invite centré
@@ -1555,7 +1564,7 @@ class CanvasWidget(QWidget):
         peintre.setBrush(Qt.BrushStyle.NoBrush)
 
         # --- Rectangle de la bulle (fond blanc, bordure colorée) ---
-        epaisseur_bordure = max(1.0, (3.0 if selectionne else 1.5) * self._echelle)
+        epaisseur_bordure = max(2.5, (4.0 if selectionne else 2.5) * self._echelle)
         peintre.setPen(QPen(couleur, epaisseur_bordure))
         peintre.setBrush(QBrush(Qt.GlobalColor.white))
         peintre.drawRect(rect_bulle)
