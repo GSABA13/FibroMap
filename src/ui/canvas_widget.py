@@ -73,6 +73,7 @@ from src.utils.constantes import (
     PADDING_BULLE,
     FACTEUR_LARGEUR_BULLE,
     PIED_LONGUEUR_DEFAUT,
+    PIED_LONGUEUR_MIN,
 )
 from src.utils.pdf_to_image import pdf_vers_pixmap
 from src.utils.pdf_utils import (
@@ -970,7 +971,7 @@ class CanvasWidget(QWidget):
                 else:
                     # Ancrage à gauche (ou au-dessus/dessous) : augmenter si on tire à gauche
                     nouvelle_longueur = bulle.pied_longueur - delta_x
-                bulle.pied_longueur = max(5.0, nouvelle_longueur)
+                bulle.pied_longueur = max(PIED_LONGUEUR_MIN, nouvelle_longueur)
                 self._drag_multi_debut = event.pos()
 
             # Drag bulle sélectionnée (corps)

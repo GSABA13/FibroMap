@@ -49,7 +49,9 @@ FACTEUR_INTERLIGNE: float = 1.4
 PADDING_BULLE: int = 12    # px
 
 # Longueur par défaut du pied perpendiculaire du call-out (en pixels image)
-PIED_LONGUEUR_DEFAUT: float = 20.0   # px
+PIED_LONGUEUR_DEFAUT: float = 40.0   # px
+# Longueur minimale du pied (plancher lors du drag)
+PIED_LONGUEUR_MIN: float = 20.0      # px
 
 # Largeur moyenne d'un glyphe à 8pt / 96 DPI, utilisée pour l'estimation du word-wrap
 LARGEUR_GLYPHE_MOYEN: float = 5.5    # px  (était 6.5 pour 9pt)
