@@ -451,11 +451,6 @@ def _dessiner_plan(c: rl_canvas.Canvas, img_pil: Image.Image,
     img_larg,
     img_haut       : dimensions de l'image source après crop (pixels)
     """
-    # Border du cartouche (ZONE_PLAN — identique pour toutes les planches)
-    c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(1)
-    c.rect(zone_x, zone_y, zone_larg, zone_haut, fill=0, stroke=1)
-
     # Dimensions de l'image en points PDF après mise à l'échelle
     img_larg_pdf = img_larg * echelle
     img_haut_pdf = img_haut * echelle
@@ -493,6 +488,11 @@ def _dessiner_plan(c: rl_canvas.Canvas, img_pil: Image.Image,
         width=img_larg_pdf,
         height=img_haut_pdf,
     )
+
+    # Border du cartouche dessinée APRÈS l'image pour apparaître par-dessus
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(1)
+    c.rect(zone_x, zone_y, zone_larg, zone_haut, fill=0, stroke=1)
 
 
 # ---------------------------------------------------------------------------
