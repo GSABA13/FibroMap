@@ -52,7 +52,17 @@
       "Bash(python -m py_compile src/services/pdf_exporter.py src/ui/canvas_widget.py)",
       "Bash(python -m py_compile src/utils/pdf_utils.py src/services/pdf_exporter.py src/ui/canvas_widget.py)",
       "Bash(python -m py_compile src/ui/canvas_widget.py)",
-      "Bash(python -m py_compile src/ui/canvas_widget.py src/services/pdf_exporter.py src/utils/pdf_utils.py)"
+      "Bash(python -m py_compile src/ui/canvas_widget.py src/services/pdf_exporter.py src/utils/pdf_utils.py)",
+      "Bash(python -m py_compile src/ui/canvas_widget.py src/ui/toolbar.py src/ui/main_window.py)",
+      "Bash(python -m py_compile src/ui/panneau_excel.py src/ui/main_window.py)",
+      "Bash(python -m py_compile src/ui/canvas_widget.py src/ui/main_window.py)",
+      "Bash(python -m py_compile src/services/legende_builder.py)",
+      "Bash(pytest tests/ -v --tb=short)",
+      "Bash(python -c \"import os; print\\(os.path.exists\\(r'C:\\\\Users\\\\user\\\\OneDrive - GENERAL SERVICE AMIANTE\\\\Bureau\\\\Outil legendage\\\\tests\\\\test_models.py'\\)\\)\")",
+      "Bash(python -m pytest tests/ --tb=no -q)",
+      "Bash(python -m pytest tests/test_legende_builder.py tests/test_couleur_resolver.py tests/test_excel_reader.py tests/test_models.py --tb=short -q)",
+      "Bash(python -m pytest tests/test_pdf_exporter.py --tb=line -q)",
+      "Bash(gh auth:*)"
     ]
   }
 }
