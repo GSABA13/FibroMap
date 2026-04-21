@@ -435,38 +435,38 @@ class TestMajBullesDepuisEchantillons:
         nb = maj_bulles_depuis_echantillons([planche], [_ech("PRV-001")])
         assert nb == 0
 
-    def test_meme_prelevement_localisations_differentes(self):
+    def test_cle_primaire_distingue_deux_bulles(self):
         """
-        Deux bulles avec le même [G] mais des [D] différents sont mises à jour
-        indépendamment — la clé composite (prelevement, localisation) permet
-        de les distinguer.
+        Deux bulles avec des id_primaire différents (colonne K) sont mises à jour
+        indépendamment — la clé primaire permet de les distinguer même si [G] est identique.
         """
         from src.services.couleur_resolver import resoudre_couleur
 
-        def _ech_avec_loc(prelevement, localisation, resultat="Absence amiante"):
+        def _ech(id_primaire, resultat="Absence amiante"):
             couleur, mention = resoudre_couleur(resultat)
             return Echantillon(
-                prelevement=prelevement, description="Desc", resultat=resultat,
-                localisation=localisation, element_sonde="Elem", reference_plan="",
+                prelevement="PRV-001", description="Desc", resultat=resultat,
+                localisation="Couloir", element_sonde="Elem", reference_plan="",
                 couleur=couleur, mention=mention,
-                texte_ligne1=prelevement, texte_ligne2="Desc", texte_ligne3=localisation,
+                texte_ligne1="PRV-001", texte_ligne2="Desc", texte_ligne3="Couloir",
+                id_primaire=id_primaire,
             )
 
-        def _bulle_loc(prelevement, localisation):
-            ech = _ech_avec_loc(prelevement, localisation)
+        def _bulle(id_primaire):
+            ech = _ech(id_primaire)
             return BulleLegende(ancrage=(0.0, 0.0), position=(0.0, 0.0),
                                 echantillon=ech, couleur_rgb=ech.couleur)
 
-        bulle_rdc  = _bulle_loc("PRV-001", "Couloir RDC")
-        bulle_r1   = _bulle_loc("PRV-001", "Couloir R+1")
-        planche = Planche(numero=1, bulles=[bulle_rdc, bulle_r1])
+        bulle_a = _bulle("K-001")
+        bulle_b = _bulle("K-002")
+        planche = Planche(numero=1, bulles=[bulle_a, bulle_b])
 
         nouveaux = [
-            _ech_avec_loc("PRV-001", "Couloir RDC", "Présence amiante"),
-            _ech_avec_loc("PRV-001", "Couloir R+1", "Absence amiante"),
+            _ech("K-001", "Présence amiante"),
+            _ech("K-002", "Absence amiante"),
         ]
         nb = maj_bulles_depuis_echantillons([planche], nouveaux)
 
         assert nb == 2
-        assert bulle_rdc.echantillon.resultat == "Présence amiante"
-        assert bulle_r1.echantillon.resultat  == "Absence amiante"
+        assert bulle_a.echantillon.resultat == "Présence amiante"
+        assert bulle_b.echantillon.resultat == "Absence amiante"

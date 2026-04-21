@@ -49,8 +49,9 @@ NOM_FEUILLE: str = "Prv Am"
 COL_LOCALISATION: int = 4    # D
 COL_ELEMENT_SONDE: int = 5   # E
 COL_DESCRIPTION: int = 6     # F
-COL_PRELEVEMENT: int = 7     # G  ← colonne clé
+COL_PRELEVEMENT: int = 7     # G
 COL_RESULTAT: int = 9        # I
+COL_ID_PRIMAIRE: int = 11    # K  ← clé primaire unique
 COL_REFERENCE_PLAN: int = 15  # O
 
 # Numéro de la première ligne de données (après les en-têtes)
@@ -137,6 +138,7 @@ def charger_excel(chemin: str) -> list[Echantillon]:
             localisation: str = _valeur_cellule(row, COL_LOCALISATION)
             element_sonde: str = _valeur_cellule(row, COL_ELEMENT_SONDE)
             reference_plan: str = _valeur_cellule(row, COL_REFERENCE_PLAN)
+            id_primaire: str = _valeur_cellule(row, COL_ID_PRIMAIRE)
 
             # Résolution de la couleur et de la mention selon le résultat
             couleur, mention = resoudre_couleur(resultat)
@@ -163,6 +165,7 @@ def charger_excel(chemin: str) -> list[Echantillon]:
                 texte_ligne1=texte_ligne1,
                 texte_ligne2=texte_ligne2,
                 texte_ligne3=texte_ligne3,
+                id_primaire=id_primaire,
             )
 
             echantillons.append(echantillon)
@@ -223,13 +226,13 @@ def maj_bulles_depuis_echantillons(
     --------
     Nombre de bulles mises à jour.
     """
-    index = {(e.prelevement, e.localisation): e for e in echantillons}
+    index = {e.id_primaire: e for e in echantillons if e.id_primaire}
     nb = 0
     for planche in planches:
         for bulle in planche.bulles:
             if bulle.echantillon is None:
                 continue
-            cle = (bulle.echantillon.prelevement, bulle.echantillon.localisation)
+            cle = bulle.echantillon.id_primaire
             nouvel_ech = index.get(cle)
             if nouvel_ech is not None:
                 bulle.echantillon = nouvel_ech

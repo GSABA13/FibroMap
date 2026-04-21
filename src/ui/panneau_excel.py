@@ -202,7 +202,7 @@ class PanneauExcel(QWidget):
         if self._filtre_places_actif:
             return [
                 e for e in self._tous_echantillons
-                if (e.prelevement, e.localisation) in self._prelev_planche_active
+                if e.id_primaire in self._prelev_planche_active
             ]
         if self._filtre_actif and self._filtre_planche:
             return [
@@ -259,7 +259,7 @@ class PanneauExcel(QWidget):
         item.setSizeHint(widget_ligne.sizeHint())
 
         # Griser et désactiver les échantillons déjà placés sur une planche
-        if (ech.prelevement, ech.localisation) in self._prelev_utilises:
+        if ech.id_primaire in self._prelev_utilises:
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             label_texte.setStyleSheet("color: #999999; text-decoration: line-through;")
             pastille.setStyleSheet(

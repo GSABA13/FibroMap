@@ -141,6 +141,7 @@ def _echantillon_vers_dict(e: Echantillon | None) -> dict | None:
         "localisation":  e.localisation,
         "element_sonde": e.element_sonde,
         "reference_plan": e.reference_plan,
+        "id_primaire":   e.id_primaire,
         "couleur":       list(e.couleur),
         "mention":       e.mention,
         "texte_ligne1":  e.texte_ligne1,
@@ -204,6 +205,7 @@ def _dict_vers_echantillon(d: dict | None) -> Echantillon | None:
         localisation=d["localisation"],
         element_sonde=d["element_sonde"],
         reference_plan=d["reference_plan"],
+        id_primaire=d.get("id_primaire", ""),  # "" pour compat JSON anciens
         couleur=tuple(d["couleur"]),
         mention=d["mention"],
         texte_ligne1=d["texte_ligne1"],
