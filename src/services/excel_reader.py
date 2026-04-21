@@ -45,18 +45,42 @@ logger = logging.getLogger(__name__)
 # Nom de la feuille cible dans le classeur Excel
 NOM_FEUILLE: str = "Prv Am"
 
-# Indices de colonnes (base 1, correspondant à l'API openpyxl)
+# Indices de colonnes fixes (base 1, correspondant à l'API openpyxl)
 COL_LOCALISATION: int = 4    # D
 COL_ELEMENT_SONDE: int = 5   # E
 COL_DESCRIPTION: int = 6     # F
 COL_PRELEVEMENT: int = 7     # G
 COL_RESULTAT: int = 9        # I
-COL_ID_PRIMAIRE: int = 11    # K  ← clé primaire unique
 COL_REFERENCE_PLAN: int = 15  # O
 
 # Numéro de la première ligne de données (après les en-têtes)
 # Les 4 premières lignes sont réservées aux en-têtes du fichier Excel
 PREMIERE_LIGNE_DONNEES: int = 5
+
+# Libellé de la colonne clé primaire tel qu'il apparaît en ligne 4 de l'Excel
+# (peut être en colonne K ou M selon le type de fichier — détection automatique)
+LIBELLE_ID_PRIMAIRE: str = "Identifiant photo"
+
+
+def _detecter_colonne_id(feuille, libelle: str) -> int | None:
+    """
+    Cherche dans la ligne d'en-tête (PREMIERE_LIGNE_DONNEES - 1) la colonne
+    dont la valeur correspond au libellé donné.
+
+    Retourne l'indice en base 1 de la colonne trouvée, ou None si absent.
+    Cela permet de supporter différents formats d'Excel où la clé primaire
+    peut se trouver en colonne K ou M selon le type de fichier.
+    """
+    ligne_entete = PREMIERE_LIGNE_DONNEES - 1
+    for row in feuille.iter_rows(min_row=ligne_entete, max_row=ligne_entete):
+        for cellule in row:
+            if cellule.value and str(cellule.value).strip() == libelle:
+                logger.debug(
+                    "Colonne '%s' détectée en colonne %d.", libelle, cellule.column
+                )
+                return cellule.column
+    logger.warning("Colonne '%s' introuvable dans les en-têtes — id_primaire sera vide.", libelle)
+    return None
 
 
 def _valeur_cellule(row: tuple, index_1base: int) -> str:
@@ -120,6 +144,9 @@ def charger_excel(chemin: str) -> list[Echantillon]:
 
         feuille = classeur[NOM_FEUILLE]
 
+        # Détection automatique de la colonne clé primaire par son libellé en ligne 4
+        col_id_primaire: int | None = _detecter_colonne_id(feuille, LIBELLE_ID_PRIMAIRE)
+
         # Parcours des lignes à partir de la première ligne de données
         for numero_ligne, row in enumerate(
             feuille.iter_rows(min_row=PREMIERE_LIGNE_DONNEES), start=PREMIERE_LIGNE_DONNEES
@@ -138,7 +165,7 @@ def charger_excel(chemin: str) -> list[Echantillon]:
             localisation: str = _valeur_cellule(row, COL_LOCALISATION)
             element_sonde: str = _valeur_cellule(row, COL_ELEMENT_SONDE)
             reference_plan: str = _valeur_cellule(row, COL_REFERENCE_PLAN)
-            id_primaire: str = _valeur_cellule(row, COL_ID_PRIMAIRE)
+            id_primaire: str = _valeur_cellule(row, col_id_primaire) if col_id_primaire else ""
 
             # Résolution de la couleur et de la mention selon le résultat
             couleur, mention = resoudre_couleur(resultat)
