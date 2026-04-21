@@ -39,7 +39,6 @@ class Echantillon:
     localisation: str       # Colonne D – localisation dans le bâtiment
     element_sonde: str      # Colonne E – élément sondé (mur, plafond, …)
     reference_plan: str     # Colonne O – référence du plan sur lequel figure le prélèvement
-    id_primaire: str = ""   # Colonne K – clé primaire unique de la ligne Excel
 
     # --- Champs calculés à partir du résultat ---
     couleur: tuple          # Tuple RGB (R, G, B) déterminé par le résultat d'analyse
@@ -49,3 +48,6 @@ class Echantillon:
     texte_ligne1: str       # Ligne 1 : identifiant du prélèvement
     texte_ligne2: str       # Ligne 2 : description (ou résultat si F == "/", ou F + élément)
     texte_ligne3: str       # Ligne 3 : localisation
+
+    # --- Clé primaire (doit être en dernier car valeur par défaut) ---
+    id_primaire: str = ""   # Colonne K – clé primaire unique de la ligne Excel
